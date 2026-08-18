@@ -2,3 +2,8 @@ api-key
 *.log
 .DS_Store
 __pycache__/
+.venv-paddleocr/
+output/
+test-data/
+test-output/
+test-output*/

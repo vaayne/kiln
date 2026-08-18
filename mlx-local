@@ -1,0 +1,195 @@
+#!/bin/zsh
+set -euo pipefail
+
+ROOT="${0:A:h}"
+source "$ROOT/config.sh"
+
+die() { print -u2 "error: $*"; exit 1; }
+
+usage() {
+  cat <<'EOF'
+mlx-local, local MLX capability hub
+
+Usage:
+  mlx-local install
+  mlx-local doctor
+  mlx-local service {start|stop|restart|status} [agent|all]
+  mlx-local chat "message"
+  mlx-local embed "text"
+  mlx-local ocr IMAGE_OR_PDF [--output DIR]
+
+Services:
+  agent      Qwen3.8 agent/chat + Qwen3 embedding API on 127.0.0.1:8007
+  ocr        uses the same server and dynamically loads PaddleOCR-VL-1.6
+EOF
+}
+
+label_for() {
+  case "$1" in
+    agent) print "$MLX_AGENT_LABEL" ;;
+    embedding) print "$MLX_AGENT_LABEL" ;;
+    *) die "unknown service: $1" ;;
+  esac
+}
+
+plist_for() {
+  print "$HOME/Library/LaunchAgents/$(label_for "$1").plist"
+}
+
+service_action() {
+  local action="$1" service="${2:-all}" label
+  local services=(agent)
+  [[ "$service" != all ]] && services=("$service")
+  for service in $services; do
+    label="$(label_for "$service")"
+    case "$action" in
+      start)
+        launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || \
+          launchctl bootstrap "gui/$(id -u)" "$(plist_for "$service")"
+        launchctl kickstart "gui/$(id -u)/$label"
+        ;;
+      restart)
+        launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || \
+          launchctl bootstrap "gui/$(id -u)" "$(plist_for "$service")"
+        launchctl kickstart -k "gui/$(id -u)/$label"
+        ;;
+      stop) launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true ;;
+      status) launchctl print "gui/$(id -u)/$label" | sed -n '1,12p' ;;
+    esac
+  done
+}
+
+http_ok() {
+  local url="$1"
+  if [[ "$url" == "$MLX_AGENT_URL" ]]; then
+    curl -fsS -m 3 -H "Authorization: Bearer $(< "$HOME/.config/mlx-vlm/api-key")" "$url/v1/models" >/dev/null
+  else
+    curl -fsS -m 3 "$url/v1/models" >/dev/null
+  fi
+}
+
+cmd_chat() {
+  local message="${*:-}"
+  [[ -n "$message" ]] || message="$(cat)"
+  [[ -n "$message" ]] || die "chat needs a message"
+  python3 - "$MLX_AGENT_URL/v1/chat/completions" "$MLX_AGENT_MODEL" "$message" "$HOME/.config/mlx-vlm/api-key" <<'PY'
+import json, sys, time, urllib.error, urllib.request
+url, model, message, key_path = sys.argv[1:]
+body = json.dumps({
+    "model": model,
+    "messages": [{"role": "user", "content": message}],
+    "temperature": 0,
+    "stream": False,
+}).encode()
+req = urllib.request.Request(url, data=body, headers={
+    "Authorization": "Bearer " + open(key_path).read().strip(),
+    "Content-Type": "application/json",
+})
+for attempt in range(12):
+    try:
+        with urllib.request.urlopen(req, timeout=600) as response:
+            data = json.load(response)
+        break
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (500, 502, 503, 504) or attempt == 11:
+            raise
+        time.sleep(2)
+    except OSError:
+        if attempt == 11:
+            raise
+        time.sleep(2)
+print(data["choices"][0]["message"].get("content", ""), end="")
+PY
+}
+
+cmd_embed() {
+  local text="${*:-}"
+  [[ -n "$text" ]] || text="$(cat)"
+  [[ -n "$text" ]] || die "embed needs text"
+  python3 - "$MLX_EMBED_URL/v1/embeddings" "$MLX_EMBED_MODEL" "$text" "$HOME/.config/mlx-vlm/api-key" <<'PY'
+import json, sys, time, urllib.error, urllib.request
+url, model, text, key_path = sys.argv[1:]
+body = json.dumps({"model": model, "input": text}).encode()
+req = urllib.request.Request(url, data=body, headers={
+    "Authorization": "Bearer " + open(key_path).read().strip(),
+    "Content-Type": "application/json",
+})
+for attempt in range(12):
+    try:
+        with urllib.request.urlopen(req, timeout=600) as response:
+            print(response.read().decode())
+        break
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (500, 502, 503, 504) or attempt == 11:
+            raise
+        time.sleep(2)
+    except OSError:
+        if attempt == 11:
+            raise
+        time.sleep(2)
+PY
+}
+
+cmd_ocr() {
+  [[ -x "$MLX_PADDLEOCR_BIN" ]] || die "PaddleOCR is not installed; run: $ROOT/mlx-local install"
+  local input="${1:-}" output="$ROOT/output"
+  [[ -n "$input" ]] || die "ocr needs an image or PDF path"
+  shift
+  while (( $# )); do
+    case "$1" in
+      --output) output="${2:?--output needs a directory}"; shift 2 ;;
+      *) die "unknown ocr option: $1" ;;
+    esac
+  done
+  mkdir -p "$output"
+  local log="$(mktemp -t mlx-local-ocr)"
+  local attempt
+  for attempt in 1 2 3; do
+    if "$MLX_PADDLEOCR_BIN" doc_parser \
+    --input "$input" \
+    --pipeline_version v1.6 \
+    --device cpu \
+    --save_path "$output" \
+    --vl_rec_backend mlx-vlm-server \
+    --vl_rec_server_url "$MLX_OCR_VLM_URL/" \
+    --vl_rec_api_model_name "$MLX_OCR_VLM_MODEL" \
+    --vl_rec_api_key "$(< "$HOME/.config/mlx-vlm/api-key")" \
+    --vl_rec_max_concurrency 1 >"$log" 2>&1; then
+      rm -f "$log"
+      print "OCR complete: $output"
+      return 0
+    fi
+    if ! grep -Eqi 'connection error|connection refused|remote disconnected|temporarily unavailable' "$log" || (( attempt == 3 )); then
+      cat "$log"
+      rm -f "$log"
+      return 1
+    fi
+    sleep 3
+  done
+  rm -f "$log"
+}
+
+cmd_doctor() {
+  print "mlx-vlm: $MLX_VLM_SERVER_BIN"
+  [[ -x "$MLX_VLM_SERVER_BIN" ]] && print "  OK server binary" || print "  MISSING server binary"
+  for pair in "agent+embedding+dynamic-ocr:$MLX_AGENT_URL"; do
+    local name="${pair%%:*}" url="${pair#*:}"
+    if http_ok "$url"; then print "  OK $name $url"; else print "  DOWN $name $url"; fi
+  done
+  if [[ -x "$MLX_PADDLEOCR_BIN" ]]; then
+    print "  OK paddleocr $MLX_PADDLEOCR_BIN"
+  else
+    print "  MISSING paddleocr $MLX_PADDLEOCR_BIN"
+  fi
+}
+
+case "${1:-help}" in
+  install) exec "$ROOT/install.sh" ;;
+  doctor) cmd_doctor ;;
+  service) shift; service_action "${1:-status}" "${2:-all}" ;;
+  chat) shift; cmd_chat "$@" ;;
+  embed) shift; cmd_embed "$@" ;;
+  ocr) shift; cmd_ocr "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage; exit 2 ;;
+esac
