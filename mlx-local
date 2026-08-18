@@ -135,6 +135,9 @@ cmd_ocr() {
   local input="${1:-}" output="$ROOT/output"
   [[ -n "$input" ]] || die "ocr needs an image or PDF path"
   shift
+  if [[ "$input" != http://* && "$input" != https://* && ! -f "$input" ]]; then
+    die "OCR input not found: $input (cwd: $PWD; use an absolute path if needed)"
+  fi
   while (( $# )); do
     case "$1" in
       --output) output="${2:?--output needs a directory}"; shift 2 ;;
@@ -144,7 +147,7 @@ cmd_ocr() {
   mkdir -p "$output"
   local log="$(mktemp -t mlx-local-ocr)"
   local attempt
-  for attempt in 1 2 3; do
+  for attempt in {1..12}; do
     if "$MLX_PADDLEOCR_BIN" doc_parser \
     --input "$input" \
     --pipeline_version v1.6 \
@@ -159,7 +162,7 @@ cmd_ocr() {
       print "OCR complete: $output"
       return 0
     fi
-    if ! grep -Eqi 'connection error|connection refused|remote disconnected|temporarily unavailable' "$log" || (( attempt == 3 )); then
+    if ! grep -Eqi 'connection error|connection refused|remote disconnected|temporarily unavailable' "$log" || (( attempt == 12 )); then
       cat "$log"
       rm -f "$log"
       return 1
