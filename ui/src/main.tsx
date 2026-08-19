@@ -8,7 +8,7 @@ type Message = { id: string; role: Role; content: string }
 type Settings = { server: { host: string; port: number }; models: Record<string, string>; runtime: Record<string, number | boolean | string> }
 type Health = { loaded_models?: Record<string, { model: string }>; effective_context_limit?: number }
 
-const nav: Array<[Tab, string, string]> = [['chat', '◇', '对话'], ['embed', '⌁', '向量'], ['ocr', '▧', '文档 OCR'], ['settings', '⚙', '设置']]
+const nav: Array<[Tab, string, string]> = [['chat', '◌', '对话'], ['embed', '⌘', '向量'], ['ocr', '▤', '文档 OCR'], ['settings', '⚙', '设置']]
 const id = () => crypto.randomUUID()
 const api = async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
   const response = await fetch(`/ui/api/${path}`, { ...init, headers: { ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...init.headers } })
@@ -38,7 +38,7 @@ function App() {
   const active = Object.values(loaded)[0]?.model || '等待 worker'
 
   return <div class="shell">
-    <aside class="rail"><div class="brand"><span class="ember">◆</span><span>Kiln</span></div>
+    <aside class="rail"><div class="traffic"><i/><i/><i/></div><div class="brand"><span class="ember">✦</span><span>Kiln</span></div>
       <nav>{nav.map(([key, icon, label]) => <button class={tab === key ? 'nav active' : 'nav'} onClick={() => setTab(key)}><span>{icon}</span>{label}</button>)}</nav>
       <div class="rail-bottom"><span class="live"/>本地服务<br/><small>{settings.server.host}:{settings.server.port}</small></div>
     </aside>
