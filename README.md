@@ -26,9 +26,13 @@ cd ~/.config/mlx-vlm
 ./mlx-local doctor
 ./mlx-local chat '解释一下什么是 RAG'
 ./mlx-local embed '这段文字用于向量检索'
-./mlx-local ocr ./invoice.pdf --output ./output
-./mlx-local service restart all
+./mlx-local ocr ./invoice.pdf
+./mlx-local logs -f
+./mlx-local unload
+./mlx-local service restart
 ```
+
+`doctor` 会列出服务当前实际加载了哪些模型，是判断内存占用的第一手依据。`ocr` 默认输出到当前目录的 `./ocr-output`，可用 `--output` 指定。
 
 ## 服务布局
 
@@ -91,10 +95,16 @@ model    = mlx-community/Qwen3.8-27B-4bit
 
 这是一个 HTTP server，不是三个常驻服务。Agent 模型启动时预加载；Embedding 和 OCR 通过请求中的模型名动态加载，平时不额外占用模型内存。生成模型切换时服务会重建 worker，通常会有约 10~15 秒冷启动窗口；`mlx-local` 会自动重试。首次调用 Embedding/OCR 之外，切回 Agent 也可能触发这段延迟。
 
-如果内存压力变高，只需要停止 Agent 服务：
+如果内存压力变高，先释放按需加载的模型，退回到只保留 Agent：
 
 ```bash
-./mlx-local service stop agent
+./mlx-local unload
+```
+
+要完全让出内存，停掉服务：
+
+```bash
+./mlx-local service stop
 ```
 
 `api-key` 不进入仓库，也不要写入日志或文档。

@@ -6,133 +6,121 @@ source "$ROOT/config.sh"
 
 die() { print -u2 "error: $*"; exit 1; }
 
+# Switching the loaded model restarts the generation worker for ~15s, during
+# which requests are refused; every command rides that out instead of failing.
+RETRIES=12
+RETRY_SLEEP=3
+
 usage() {
   cat <<'EOF'
-mlx-local, local MLX capability hub
+mlx-local, local MLX capability hub on http://127.0.0.1:8007
 
 Usage:
+  mlx-local chat "message"           agent reply (reads stdin when no argument)
+  mlx-local embed "text"             embedding JSON (reads stdin when no argument)
+  mlx-local ocr FILE [--output DIR]  document parse to md, json, docx, layout png
+  mlx-local doctor                   binaries, server health, loaded models
+  mlx-local logs [-f] [-n LINES]     server log
+  mlx-local unload                   drop on-demand models, back to agent only
+  mlx-local service {start|stop|restart|status}
   mlx-local install
-  mlx-local doctor
-  mlx-local service {start|stop|restart|status} [agent|all]
-  mlx-local chat "message"
-  mlx-local embed "text"
-  mlx-local ocr IMAGE_OR_PDF [--output DIR]
 
-Services:
-  agent      Qwen3.8 agent/chat + Qwen3 embedding API on 127.0.0.1:8007
-  ocr        uses the same server and dynamically loads PaddleOCR-VL-1.6
+The agent model is preloaded; embedding and OCR models load on first use. Only
+one generation model stays resident, so alternating chat and OCR pays a reload.
 EOF
 }
 
-label_for() {
-  case "$1" in
-    agent) print "$MLX_AGENT_LABEL" ;;
-    embedding) print "$MLX_AGENT_LABEL" ;;
-    *) die "unknown service: $1" ;;
-  esac
-}
-
-plist_for() {
-  print "$HOME/Library/LaunchAgents/$(label_for "$1").plist"
+api_curl() {
+  curl -fsS -m 10 -H "Authorization: Bearer $(< "$MLX_API_KEY_FILE")" "$@"
 }
 
 service_action() {
-  local action="$1" service="${2:-all}" label
-  local services=(agent)
-  [[ "$service" != all ]] && services=("$service")
-  for service in $services; do
-    label="$(label_for "$service")"
-    case "$action" in
-      start)
-        launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || \
-          launchctl bootstrap "gui/$(id -u)" "$(plist_for "$service")"
-        launchctl kickstart "gui/$(id -u)/$label"
-        ;;
-      restart)
-        launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 || \
-          launchctl bootstrap "gui/$(id -u)" "$(plist_for "$service")"
-        launchctl kickstart -k "gui/$(id -u)/$label"
-        ;;
-      stop) launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true ;;
-      status) launchctl print "gui/$(id -u)/$label" | sed -n '1,12p' ;;
-    esac
-  done
+  local domain="gui/$(id -u)" action="$1"
+  case "$action" in
+    start|restart)
+      launchctl print "$domain/$MLX_LABEL" >/dev/null 2>&1 || \
+        launchctl bootstrap "$domain" "$HOME/Library/LaunchAgents/$MLX_LABEL.plist"
+      if [[ "$action" == restart ]]; then
+        launchctl kickstart -k "$domain/$MLX_LABEL"
+      else
+        launchctl kickstart "$domain/$MLX_LABEL"
+      fi
+      ;;
+    stop) launchctl bootout "$domain/$MLX_LABEL" 2>/dev/null || true ;;
+    status) launchctl print "$domain/$MLX_LABEL" | sed -n '1,12p' ;;
+    *) die "unknown service action: $action" ;;
+  esac
 }
 
-http_ok() {
-  local url="$1"
-  if [[ "$url" == "$MLX_AGENT_URL" ]]; then
-    curl -fsS -m 3 -H "Authorization: Bearer $(< "$HOME/.config/mlx-vlm/api-key")" "$url/v1/models" >/dev/null
-  else
-    curl -fsS -m 3 "$url/v1/models" >/dev/null
-  fi
-}
-
-cmd_chat() {
-  local message="${*:-}"
-  [[ -n "$message" ]] || message="$(cat)"
-  [[ -n "$message" ]] || die "chat needs a message"
-  python3 - "$MLX_AGENT_URL/v1/chat/completions" "$MLX_AGENT_MODEL" "$message" "$HOME/.config/mlx-vlm/api-key" <<'PY'
+# Body is built in python so arbitrarily large stdin never hits ARG_MAX.
+api_request() {
+  local kind="$1" model="$2" text_file="$3"
+  python3 - "$kind" "$MLX_URL" "$model" "$text_file" "$MLX_API_KEY_FILE" "$RETRIES" "$RETRY_SLEEP" <<'PY'
 import json, sys, time, urllib.error, urllib.request
-url, model, message, key_path = sys.argv[1:]
-body = json.dumps({
-    "model": model,
-    "messages": [{"role": "user", "content": message}],
-    "temperature": 0,
-    "stream": False,
-}).encode()
-req = urllib.request.Request(url, data=body, headers={
-    "Authorization": "Bearer " + open(key_path).read().strip(),
-    "Content-Type": "application/json",
-})
-for attempt in range(12):
+
+kind, base, model, text_path, key_path, retries, delay = sys.argv[1:]
+retries, delay = int(retries), float(delay)
+text = open(text_path, encoding="utf-8").read()
+
+if kind == "chat":
+    path = "/v1/chat/completions"
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": text}],
+        "temperature": 0,
+        "stream": False,
+    }
+else:
+    path = "/v1/embeddings"
+    payload = {"model": model, "input": text}
+
+request = urllib.request.Request(
+    base + path,
+    data=json.dumps(payload).encode(),
+    headers={
+        "Authorization": "Bearer " + open(key_path).read().strip(),
+        "Content-Type": "application/json",
+    },
+)
+
+for attempt in range(retries):
+    final = attempt == retries - 1
     try:
-        with urllib.request.urlopen(req, timeout=600) as response:
-            data = json.load(response)
+        with urllib.request.urlopen(request, timeout=600) as response:
+            body = response.read().decode()
         break
     except urllib.error.HTTPError as exc:
-        if exc.code not in (500, 502, 503, 504) or attempt == 11:
+        if exc.code not in (500, 502, 503, 504) or final:
             raise
-        time.sleep(2)
     except OSError:
-        if attempt == 11:
+        if final:
             raise
-        time.sleep(2)
-print(data["choices"][0]["message"].get("content", ""), end="")
+    time.sleep(delay)
+
+if kind == "chat":
+    print(json.loads(body)["choices"][0]["message"].get("content", ""))
+else:
+    print(body)
 PY
 }
 
-cmd_embed() {
+run_with_text() {
+  local kind="$1" model="$2"
+  shift 2
   local text="${*:-}"
   [[ -n "$text" ]] || text="$(cat)"
-  [[ -n "$text" ]] || die "embed needs text"
-  python3 - "$MLX_EMBED_URL/v1/embeddings" "$MLX_EMBED_MODEL" "$text" "$HOME/.config/mlx-vlm/api-key" <<'PY'
-import json, sys, time, urllib.error, urllib.request
-url, model, text, key_path = sys.argv[1:]
-body = json.dumps({"model": model, "input": text}).encode()
-req = urllib.request.Request(url, data=body, headers={
-    "Authorization": "Bearer " + open(key_path).read().strip(),
-    "Content-Type": "application/json",
-})
-for attempt in range(12):
-    try:
-        with urllib.request.urlopen(req, timeout=600) as response:
-            print(response.read().decode())
-        break
-    except urllib.error.HTTPError as exc:
-        if exc.code not in (500, 502, 503, 504) or attempt == 11:
-            raise
-        time.sleep(2)
-    except OSError:
-        if attempt == 11:
-            raise
-        time.sleep(2)
-PY
+  [[ -n "$text" ]] || die "$kind needs text, as an argument or on stdin"
+  local file rc=0
+  file="$(mktemp -t mlx-local)"
+  print -rn -- "$text" > "$file"
+  api_request "$kind" "$model" "$file" || rc=$?
+  rm -f "$file"
+  return $rc
 }
 
 cmd_ocr() {
-  [[ -x "$MLX_PADDLEOCR_BIN" ]] || die "PaddleOCR is not installed; run: $ROOT/mlx-local install"
-  local input="${1:-}" output="$ROOT/output"
+  [[ -x "$MLX_PADDLEOCR_BIN" ]] || die "PaddleOCR is not installed; run: mlx-local install"
+  local input="${1:-}" output="$PWD/ocr-output"
   [[ -n "$input" ]] || die "ocr needs an image or PDF path"
   shift
   if [[ "$input" != http://* && "$input" != https://* && ! -f "$input" ]]; then
@@ -145,54 +133,98 @@ cmd_ocr() {
     esac
   done
   mkdir -p "$output"
-  local log="$(mktemp -t mlx-local-ocr)"
-  local attempt
-  for attempt in {1..12}; do
+  local log attempt
+  log="$(mktemp -t mlx-local-ocr)"
+  for attempt in {1..$RETRIES}; do
     if "$MLX_PADDLEOCR_BIN" doc_parser \
-    --input "$input" \
-    --pipeline_version v1.6 \
-    --device cpu \
-    --save_path "$output" \
-    --vl_rec_backend mlx-vlm-server \
-    --vl_rec_server_url "$MLX_OCR_VLM_URL/" \
-    --vl_rec_api_model_name "$MLX_OCR_VLM_MODEL" \
-    --vl_rec_api_key "$(< "$HOME/.config/mlx-vlm/api-key")" \
-    --vl_rec_max_concurrency 1 >"$log" 2>&1; then
+      --input "$input" \
+      --pipeline_version v1.6 \
+      --device cpu \
+      --save_path "$output" \
+      --vl_rec_backend mlx-vlm-server \
+      --vl_rec_server_url "$MLX_URL/" \
+      --vl_rec_api_model_name "$MLX_OCR_VLM_MODEL" \
+      --vl_rec_api_key "$(< "$MLX_API_KEY_FILE")" \
+      --vl_rec_max_concurrency 1 >"$log" 2>&1; then
       rm -f "$log"
       print "OCR complete: $output"
       return 0
     fi
-    if ! grep -Eqi 'connection error|connection refused|remote disconnected|temporarily unavailable' "$log" || (( attempt == 12 )); then
-      cat "$log"
+    if ! grep -Eqi 'connection error|connection refused|remote disconnected|temporarily unavailable' "$log" \
+      || (( attempt == RETRIES )); then
+      cat "$log" >&2
       rm -f "$log"
       return 1
     fi
-    sleep 3
+    sleep "$RETRY_SLEEP"
   done
-  rm -f "$log"
+}
+
+cmd_logs() {
+  local lines=50 follow=()
+  while (( $# )); do
+    case "$1" in
+      -f) follow=(-f); shift ;;
+      -n) lines="${2:?-n needs a line count}"; shift 2 ;;
+      *) die "unknown logs option: $1" ;;
+    esac
+  done
+  [[ -f "$MLX_LOG" ]] || die "no log yet: $MLX_LOG"
+  tail $follow -n "$lines" "$MLX_LOG"
+}
+
+cmd_unload() {
+  # The server tears its worker down mid-response, so an empty reply is expected.
+  api_curl -X POST "$MLX_URL/unload" >/dev/null 2>&1 || true
+  local attempt
+  for attempt in {1..$RETRIES}; do
+    if api_curl "$MLX_URL/health" >/dev/null 2>&1; then
+      cmd_doctor
+      return 0
+    fi
+    sleep "$RETRY_SLEEP"
+  done
+  die "server did not come back after unload"
 }
 
 cmd_doctor() {
-  print "mlx-vlm: $MLX_VLM_SERVER_BIN"
-  [[ -x "$MLX_VLM_SERVER_BIN" ]] && print "  OK server binary" || print "  MISSING server binary"
-  for pair in "agent+embedding+dynamic-ocr:$MLX_AGENT_URL"; do
-    local name="${pair%%:*}" url="${pair#*:}"
-    if http_ok "$url"; then print "  OK $name $url"; else print "  DOWN $name $url"; fi
+  local rc=0 health name bin
+  for name bin in "server binary " "$MLX_VLM_SERVER_BIN" "paddleocr     " "$MLX_PADDLEOCR_BIN"; do
+    if [[ -x "$bin" ]]; then
+      print "ok       $name $bin"
+    else
+      print "MISSING  $name $bin"
+      rc=1
+    fi
   done
-  if [[ -x "$MLX_PADDLEOCR_BIN" ]]; then
-    print "  OK paddleocr $MLX_PADDLEOCR_BIN"
+  if health="$(api_curl "$MLX_URL/health" 2>/dev/null)"; then
+    print "ok       server         $MLX_URL"
+    python3 - "$health" <<'PY'
+import json, sys
+health = json.loads(sys.argv[1])
+loaded = health.get("loaded_models") or {}
+for kind, info in loaded.items():
+    print("         loaded         %s: %s" % (kind, info.get("model")))
+if not loaded:
+    print("         loaded         none")
+print("         context        %s" % health.get("effective_context_limit"))
+PY
   else
-    print "  MISSING paddleocr $MLX_PADDLEOCR_BIN"
+    print "DOWN     server         $MLX_URL"
+    rc=1
   fi
+  return $rc
 }
 
 case "${1:-help}" in
   install) exec "$ROOT/install.sh" ;;
   doctor) cmd_doctor ;;
-  service) shift; service_action "${1:-status}" "${2:-all}" ;;
-  chat) shift; cmd_chat "$@" ;;
-  embed) shift; cmd_embed "$@" ;;
+  service) shift; service_action "${1:-status}" ;;
+  chat) shift; run_with_text chat "$MLX_AGENT_MODEL" "$@" ;;
+  embed) shift; run_with_text embed "$MLX_EMBED_MODEL" "$@" ;;
   ocr) shift; cmd_ocr "$@" ;;
+  logs) shift; cmd_logs "$@" ;;
+  unload) cmd_unload ;;
   help|-h|--help) usage ;;
   *) usage; exit 2 ;;
 esac

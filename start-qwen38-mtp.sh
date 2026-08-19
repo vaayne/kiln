@@ -1,14 +1,16 @@
 #!/bin/zsh
 set -euo pipefail
 
-export PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export MLX_VLM_SERVER_API_KEY="$(< "$HOME/.config/mlx-vlm/api-key")"
+source "${0:A:h}/config.sh"
 
-exec "$HOME/.local/bin/mlx_vlm.server" \
-  --host 127.0.0.1 \
-  --port 8007 \
-  --model mlx-community/Qwen3.8-27B-4bit \
-  --draft-model mlx-community/Qwen3.8-27B-MTP-4bit \
+export PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export MLX_VLM_SERVER_API_KEY="$(< "$MLX_API_KEY_FILE")"
+
+exec "$MLX_VLM_SERVER_BIN" \
+  --host "$MLX_HOST" \
+  --port "$MLX_PORT" \
+  --model "$MLX_AGENT_MODEL" \
+  --draft-model "$MLX_AGENT_DRAFT_MODEL" \
   --draft-kind mtp \
   --draft-block-size 3 \
   --kv-bits 8 \

@@ -36,7 +36,7 @@ cd ~/.config/mlx-vlm
 
 ```bash
 uv tool install --force --with jinja2 mlx-vlm@latest
-mlx-local service restart all
+mlx-local service restart
 ```
 
 升级后必须跑 `mlx-local doctor` 和最小请求，不要只看进程是否存在。
@@ -65,11 +65,15 @@ mlx-local service restart all
 mlx-local doctor
 mlx-local chat '只回复 OK'
 mlx-local embed '用于 RAG 检索的文本'
-mlx-local ocr ./invoice.pdf --output ./output
-mlx-local service restart agent
-mlx-local service stop agent
-mlx-local service status all
+mlx-local ocr ./invoice.pdf --output ./ocr-output
+mlx-local logs -n 100
+mlx-local unload
+mlx-local service restart
+mlx-local service stop
+mlx-local service status
 ```
+
+`doctor` 输出包含服务当前加载的模型分组，排查内存和模型切换问题先看它。模型名、端口和路径只在 `config.sh` 定义一次，`start-qwen38-mtp.sh` 和 `mlx-local` 都从那里读，不要在别处硬编码。
 
 Agent API 兼容 OpenAI `/v1/chat/completions`，Embedding 兼容 `/v1/embeddings`。三类请求共用本目录的 `api-key`，服务只监听 localhost。
 
@@ -79,9 +83,7 @@ Agent 短 prompt 基线约 25 tok/s，4.8K prompt 解码约 22~24 tok/s。连续
 
 所有能力共享一个 HTTP server 和统一内存。Agent 预加载，Embedding/OCR 按需动态加载；首次调用它们会有冷启动延迟。
 
-```bash
-mlx-local service stop agent
-```
+`mlx-local unload` 释放按需加载的模型；服务会重建 worker 并重新预加载 Agent，等价于回到基线占用。彻底让出内存用 `mlx-local service stop`。
 
 模型原生上下文约 256K，Agent 当前 `max-kv-size=65536`。64K 以内完整保留，超过上限会 rotating KV 静默覆盖旧上下文，不会返回错误，不能把它当作无限上下文使用。
 
@@ -89,7 +91,7 @@ mlx-local service stop agent
 
 OCR 首次启动会下载 `PaddlePaddle/PaddleOCR-VL-1.6` 和 PaddleOCR 的版面模型，首次调用还可能下载字体。完整文档解析比直接 VLM 看图慢，但会保留布局、表格和 Markdown/JSON/DOCX 输出。
 
-`mlx-local ocr` 默认输出到 `./output`，失败时会保留服务端/客户端错误；成功时只打印输出目录，避免把整份结构化结果刷满终端。
+`mlx-local ocr` 默认输出到当前目录的 `./ocr-output`，失败时把服务端/客户端错误打到 stderr；成功时只打印输出目录，避免把整份结构化结果刷满终端。输入路径在调用 PaddleOCR 前先校验，路径错会直接报错而不是抛 PaddleOCR 的 worker traceback。
 
 ## launchd
 
