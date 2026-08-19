@@ -4,7 +4,7 @@
 set -uo pipefail
 
 source "${0:A:h}/config.sh"
-CLI="$MLX_ROOT/kiln"
+CLI="$KILN_ROOT/kiln"
 
 failures=0
 pass() { print "  ok    $*" }
@@ -26,15 +26,38 @@ expect_error() {
 }
 
 print "syntax"
-for f in "$MLX_ROOT"/*.sh "$CLI"; do
+for f in "$KILN_ROOT"/*.sh "$CLI"; do
   check "${f:t}" zsh -n "$f"
 done
-for f in "$MLX_ROOT"/launchd/*.plist.in; do
+for f in "$KILN_ROOT"/launchd/*.plist.in; do
   check "${f:t}" plutil -lint "$f"
 done
 
 print "\nservice"
 check "doctor" "$CLI" doctor
+
+print "\nweb UI"
+ui_cookie="$(mktemp -t kiln-ui-cookie)"
+if [[ "$(curl -sS -o /dev/null -w '%{http_code}' "$KILN_URL/ui/api/settings")" == 401 ]]; then
+  pass "settings require a browser session"
+else
+  fail "settings require a browser session"
+fi
+ui_session="$(curl -fsS -H "Authorization: Bearer $(< "$KILN_API_KEY_FILE")" -X POST "$KILN_URL/ui/api/session" 2>/dev/null)"
+ui_url="$("$KILN_PYTHON" -c 'import json, sys; print(json.loads(sys.argv[1])["url"])' "$ui_session")"
+if curl -fsS -L -c "$ui_cookie" "$ui_url" 2>/dev/null | grep -q '<title>Kiln</title>' \
+  && curl -fsS -b "$ui_cookie" "$KILN_URL/ui/api/settings" 2>/dev/null | "$KILN_PYTHON" -c 'import json, sys; assert json.load(sys.stdin)["server"]["port"] == 8007' 2>/dev/null; then
+  pass "session and settings"
+else
+  fail "session and settings"
+fi
+if curl -fsS -b "$ui_cookie" -H 'Content-Type: application/json' -X POST "$KILN_URL/ui/api/chat" \
+  -d "{\"model\":\"$KILN_AGENT_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"只回复 OK\"}],\"temperature\":0}" 2>/dev/null \
+  | "$KILN_PYTHON" -c 'import json, sys; assert json.load(sys.stdin)["choices"][0]["message"]["content"].strip()' 2>/dev/null; then
+  pass "chat proxy"
+else
+  fail "chat proxy"
+fi
 
 print "\nchat"
 if [[ "$("$CLI" chat '只回复 OK' 2>/dev/null)" == OK ]]; then
@@ -61,7 +84,7 @@ fi
 
 print "\nocr (slow, loads a second model)"
 work="$(mktemp -d -t kiln-verify)"
-"$MLX_PADDLE_PYTHON" - "$work/sample.png" <<'PY' 2>/dev/null
+"$KILN_PADDLE_PYTHON" - "$work/sample.png" <<'PY' 2>/dev/null
 import sys
 from PIL import Image, ImageDraw
 image = Image.new("RGB", (1000, 400), "white")
@@ -118,6 +141,7 @@ empty_output="$(print -n '' | "$CLI" chat 2>&1)"
 if [[ "$empty_output" == *'needs text'* ]]; then pass "empty input"; else fail "empty input"; fi
 
 rm -rf "$work"
+rm -f "$ui_cookie"
 
 if (( failures )); then
   print -u2 "\n$failures check(s) failed"

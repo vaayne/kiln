@@ -13,7 +13,7 @@ RETRY_SLEEP=3
 
 usage() {
   cat <<EOF
-kiln, local AI capability hub on $MLX_URL
+kiln, local AI capability hub on $KILN_URL
 
 Usage:
   kiln chat "message"           agent reply (reads stdin when no argument)
@@ -24,54 +24,49 @@ Usage:
   kiln unload                   drop on-demand models, back to agent only
   kiln service {start|stop|restart|status}
   kiln install
-  kiln serve                    run the server in the foreground
+  kiln serve                    run gateway and MLX worker in the foreground
+  kiln ui                       open the local WebUI
 
 The agent model is preloaded; embedding and OCR models load on first use. Only
 one generation model stays resident, so alternating chat and OCR pays a reload.
 EOF
 }
 
-# launchd's entry point. Tuned for a 48GB M5 Pro; read AGENTS.md before changing
-# any of these, several interact badly.
+# launchd's entry point. The gateway owns the public port and supervises the
+# MLX worker on KILN_UPSTREAM_PORT, so /ui and /v1 share one external address.
 cmd_serve() {
   export PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-  export MLX_VLM_SERVER_API_KEY="$(< "$MLX_API_KEY_FILE")"
-  exec "$MLX_SERVER_BIN" \
-    --host "$MLX_HOST" \
-    --port "$MLX_PORT" \
-    --model "$MLX_AGENT_MODEL" \
-    --draft-model "$MLX_AGENT_DRAFT_MODEL" \
-    --draft-kind mtp \
-    --draft-block-size 3 \
-    --kv-bits 8 \
-    --quantized-kv-start 2048 \
-    --max-kv-size 65536 \
-    --enable-thinking \
-    --max-tokens 16384 \
-    --prefill-step-size 2048 \
-    --vision-cache-size 4 \
-    --max-num-seqs 1 \
-    --log-progress-interval 50
+  exec "$KILN_PYTHON" "$KILN_ROOT/kiln_server.py"
+}
+
+cmd_ui() {
+  local response url
+  response="$(api_curl -X POST "$KILN_URL/ui/api/session")" || die "Kiln is not running; run: kiln service start"
+  url="$(
+    "$KILN_PYTHON" -c 'import json, sys; print(json.loads(sys.argv[1])["url"])' "$response"
+  )" || die "could not open a WebUI session"
+  open "$url"
+  print "Opened: $KILN_URL/ui"
 }
 
 api_curl() {
-  curl -fsS -m 10 -H "Authorization: Bearer $(< "$MLX_API_KEY_FILE")" "$@"
+  curl -fsS -m 10 -H "Authorization: Bearer $(< "$KILN_API_KEY_FILE")" "$@"
 }
 
 service_action() {
   local domain="gui/$(id -u)" action="$1"
   case "$action" in
     start|restart)
-      launchctl print "$domain/$MLX_LABEL" >/dev/null 2>&1 || \
-        launchctl bootstrap "$domain" "$HOME/Library/LaunchAgents/$MLX_LABEL.plist"
+      launchctl print "$domain/$KILN_LABEL" >/dev/null 2>&1 || \
+        launchctl bootstrap "$domain" "$HOME/Library/LaunchAgents/$KILN_LABEL.plist"
       if [[ "$action" == restart ]]; then
-        launchctl kickstart -k "$domain/$MLX_LABEL"
+        launchctl kickstart -k "$domain/$KILN_LABEL"
       else
-        launchctl kickstart "$domain/$MLX_LABEL"
+        launchctl kickstart "$domain/$KILN_LABEL"
       fi
       ;;
-    stop) launchctl bootout "$domain/$MLX_LABEL" 2>/dev/null || true ;;
-    status) launchctl print "$domain/$MLX_LABEL" | sed -n '1,12p' ;;
+    stop) launchctl bootout "$domain/$KILN_LABEL" 2>/dev/null || true ;;
+    status) launchctl print "$domain/$KILN_LABEL" | sed -n '1,12p' ;;
     *) die "unknown service action: $action" ;;
   esac
 }
@@ -79,7 +74,7 @@ service_action() {
 # Body is built in python so arbitrarily large stdin never hits ARG_MAX.
 api_request() {
   local kind="$1" model="$2" text_file="$3"
-  python3 - "$kind" "$MLX_URL" "$model" "$text_file" "$MLX_API_KEY_FILE" "$RETRIES" "$RETRY_SLEEP" <<'PY'
+  python3 - "$kind" "$KILN_URL" "$model" "$text_file" "$KILN_API_KEY_FILE" "$RETRIES" "$RETRY_SLEEP" <<'PY'
 import json, sys, time, urllib.error, urllib.request
 
 kind, base, model, text_path, key_path, retries, delay = sys.argv[1:]
@@ -143,7 +138,7 @@ run_with_text() {
 }
 
 cmd_ocr() {
-  [[ -x "$MLX_PADDLEOCR_BIN" ]] || die "PaddleOCR is not installed; run: kiln install"
+  [[ -x "$KILN_PADDLEOCR_BIN" ]] || die "PaddleOCR is not installed; run: kiln install"
   local input="${1:-}" output="$PWD/ocr-output"
   [[ -n "$input" ]] || die "ocr needs an image or PDF path"
   shift
@@ -160,15 +155,15 @@ cmd_ocr() {
   local log attempt
   log="$(mktemp -t kiln-ocr)"
   for attempt in {1..$RETRIES}; do
-    if "$MLX_PADDLEOCR_BIN" doc_parser \
+    if "$KILN_PADDLEOCR_BIN" doc_parser \
       --input "$input" \
       --pipeline_version v1.6 \
       --device cpu \
       --save_path "$output" \
       --vl_rec_backend mlx-vlm-server \
-      --vl_rec_server_url "$MLX_URL/" \
-      --vl_rec_api_model_name "$MLX_OCR_VLM_MODEL" \
-      --vl_rec_api_key "$(< "$MLX_API_KEY_FILE")" \
+      --vl_rec_server_url "$KILN_URL/" \
+      --vl_rec_api_model_name "$KILN_OCR_VLM_MODEL" \
+      --vl_rec_api_key "$(< "$KILN_API_KEY_FILE")" \
       --vl_rec_max_concurrency 1 >"$log" 2>&1; then
       rm -f "$log"
       print "OCR complete: $output"
@@ -193,16 +188,16 @@ cmd_logs() {
       *) die "unknown logs option: $1" ;;
     esac
   done
-  [[ -f "$MLX_LOG" ]] || die "no log yet: $MLX_LOG"
-  tail $follow -n "$lines" "$MLX_LOG"
+  [[ -f "$KILN_LOG" ]] || die "no log yet: $KILN_LOG"
+  tail $follow -n "$lines" "$KILN_LOG"
 }
 
 cmd_unload() {
   # The server tears its worker down mid-response, so an empty reply is expected.
-  api_curl -X POST "$MLX_URL/unload" >/dev/null 2>&1 || true
+  api_curl -X POST "$KILN_URL/unload" >/dev/null 2>&1 || true
   local attempt
   for attempt in {1..$RETRIES}; do
-    if api_curl "$MLX_URL/health" >/dev/null 2>&1; then
+    if api_curl "$KILN_URL/health" >/dev/null 2>&1; then
       cmd_doctor
       return 0
     fi
@@ -213,7 +208,7 @@ cmd_unload() {
 
 cmd_doctor() {
   local rc=0 health name bin
-  for name bin in "server binary" "$MLX_SERVER_BIN" paddleocr "$MLX_PADDLEOCR_BIN"; do
+  for name bin in "server binary" "$MLX_SERVER_BIN" paddleocr "$KILN_PADDLEOCR_BIN"; do
     if [[ -x "$bin" ]]; then
       printf 'ok       %-14s %s\n' "$name" "$bin"
     else
@@ -221,8 +216,8 @@ cmd_doctor() {
       rc=1
     fi
   done
-  if health="$(api_curl "$MLX_URL/health" 2>/dev/null)"; then
-    printf 'ok       %-14s %s\n' server "$MLX_URL"
+  if health="$(api_curl "$KILN_URL/health" 2>/dev/null)"; then
+    printf 'ok       %-14s %s\n' server "$KILN_URL"
     python3 - "$health" <<'PY'
 import json, sys
 health = json.loads(sys.argv[1])
@@ -234,7 +229,7 @@ if not loaded:
 print("         %-14s %s" % ("context", health.get("effective_context_limit")))
 PY
   else
-    printf 'DOWN     %-14s %s\n' server "$MLX_URL"
+    printf 'DOWN     %-14s %s\n' server "$KILN_URL"
     rc=1
   fi
   return $rc
@@ -243,10 +238,11 @@ PY
 case "${1:-help}" in
   install) exec "$ROOT/install.sh" ;;
   serve) cmd_serve ;;
+  ui) cmd_ui ;;
   doctor) cmd_doctor ;;
   service) shift; service_action "${1:-status}" ;;
-  chat) shift; run_with_text chat "$MLX_AGENT_MODEL" "$@" ;;
-  embed) shift; run_with_text embed "$MLX_EMBED_MODEL" "$@" ;;
+  chat) shift; run_with_text chat "$KILN_AGENT_MODEL" "$@" ;;
+  embed) shift; run_with_text embed "$KILN_EMBED_MODEL" "$@" ;;
   ocr) shift; cmd_ocr "$@" ;;
   logs) shift; cmd_logs "$@" ;;
   unload) cmd_unload ;;

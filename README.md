@@ -1,6 +1,6 @@
 # Kiln
 
-一个面向 Apple Silicon 的本地 AI 能力包：Agent、Embedding 和 PaddleOCR-VL 文档解析统一由 launchd 管理。
+一个面向 Apple Silicon 的本地 AI 能力包：Chat、Embedding、PaddleOCR-VL 文档解析和本地 WebUI 统一由 launchd 管理。
 
 ## 安装
 
@@ -13,10 +13,10 @@ cd ~/workspace/kiln
 
 安装脚本会：
 
-1. 用 `uv tool install --force --with jinja2 mlx-vlm@latest` 安装 MLX-VLM。
+1. 用 `uv tool install` 安装 MLX-VLM、FastAPI 网关和 chat template 依赖。
 2. 创建独立的 Python 3.12 PaddleOCR 环境，避免和 MLX 的 Python 3.14 环境冲突。
 3. 安装 PaddlePaddle CPU runtime 和 `paddleocr[doc-parser]`。
-4. 安装并启动唯一的 MLX-VLM launchd 服务。
+4. 安装并启动 Kiln 网关及其唯一的 MLX worker。
 
 首次使用会从 Hugging Face 下载模型。
 
@@ -24,6 +24,7 @@ cd ~/workspace/kiln
 
 ```bash
 ./kiln doctor
+./kiln ui                 # 打开 http://127.0.0.1:8007/ui
 ./kiln chat '解释一下什么是 RAG'
 ./kiln embed '这段文字用于向量检索'
 ./kiln ocr ./invoice.pdf
@@ -34,11 +35,16 @@ cd ~/workspace/kiln
 
 `doctor` 会列出服务当前实际加载了哪些模型，是判断内存占用的第一手依据。`ocr` 默认输出到当前目录的 `./ocr-output`，可用 `--output` 指定。
 
+## WebUI
+
+运行 `./kiln ui` 会在浏览器打开 `/ui`。它有 Chat、向量、OCR 和设置四个工作区；设置写入 `~/.config/kiln/config.toml`，点击“应用并重启”后才会重建 MLX worker。浏览器不接触 API key。
+
 ## 服务布局
 
 | 能力 | 地址 | 后端 |
 | --- | --- | --- |
-| Agent / Chat | `127.0.0.1:8007` | Qwen3.8-27B + MTP |
+| WebUI / API gateway | `127.0.0.1:8007/ui` / `:8007/v1/*` | FastAPI，唯一公开端口 |
+| Agent / Chat | `127.0.0.1:8007/v1/chat/completions` | Qwen3.8-27B + MTP |
 | Embedding | `127.0.0.1:8007/v1/embeddings` | Qwen3-Embedding-4B，按需加载 |
 | OCR VLM | `127.0.0.1:8007/v1/chat/completions` | PaddleOCR-VL-1.6，按需加载 |
 
@@ -46,7 +52,7 @@ OCR 不是直接请求 VLM。完整流程由 PaddleOCR 在 CPU 上负责版面�
 
 ## HTTP endpoints
 
-所有 endpoint 都在 `127.0.0.1:8007`，需要 `api-key`：
+公开 API 都在 `127.0.0.1:8007`，需要 `api-key`。`/ui` 则通过 `kiln ui` 创建的短期浏览器会话访问：
 
 ```bash
 curl -H "Authorization: Bearer $(< api-key)" http://127.0.0.1:8007/health
@@ -84,7 +90,9 @@ model    = mlx-community/Qwen3.8-27B-4bit
 
 | 文件 | 用途 |
 | --- | --- |
-| `config.sh` | 端口、模型名和路径的唯一来源 |
+| `~/.config/kiln/config.toml` | 模型与运行参数的唯一可编辑来源，WebUI 安全地读写它 |
+| `config.sh` | 将 `~/.config/kiln/config.toml` 统一导出给 shell 消费者；只放路径和密钥文件位置 |
+| `kiln_server.py` | `:8007` 网关、`/ui` 和私有 MLX worker supervisor |
 | `kiln` | 统一命令入口 |
 | `verify.sh` | 回归验收，改动后跑它 |
 | `install.sh` | 安装依赖并注册 launchd |
