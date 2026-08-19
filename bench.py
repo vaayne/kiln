@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, sys, time, urllib.request
+import json, os, time, urllib.request
 
 URL = os.environ.get("KILN_URL", "http://127.0.0.1:8007") + "/v1/chat/completions"
 KEY = open(os.path.expanduser(

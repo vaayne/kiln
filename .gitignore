@@ -7,6 +7,4 @@ ocr-output/
 test-data/
 test-output*/
 
-ui/node_modules/
-
 skills/*-workspace/
