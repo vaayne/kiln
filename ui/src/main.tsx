@@ -81,10 +81,26 @@ function Embed({ settings }: { settings: Settings }) {
   return <section class="page"><div class="intro"><span>向量工作台</span><h2>把文本变成可检索的语义坐标。</h2><p>{settings.models.embedding}</p></div><form class="stack" onSubmit={run}><textarea rows={8} value={input} onInput={e => setInput((e.target as HTMLTextAreaElement).value)} placeholder="粘贴需要向量化的内容"/><button disabled={busy}>{busy ? '生成中…' : '生成向量'}</button></form>{result && <div class="result-card"><div><strong>{result.length.toLocaleString()} 维</strong><span>已生成</span></div><button class="quiet" onClick={download}>下载 JSON</button><pre>{JSON.stringify(result.slice(0, 24), null, 2)}</pre></div>}</section>
 }
 
+function MarkdownPreview({ source }: { source: string }) {
+  if (!source.trim()) return <div class="preview-empty">没有可显示的 Markdown，仍可查看版面检测图或下载产物。</div>
+  return <article class="markdown-preview">{source.split(/\n{2,}/).map((block, index) => {
+    const lines = block.trim().split('\n')
+    if (lines[0].startsWith('# ')) return <h2 key={index}>{lines[0].slice(2)}</h2>
+    if (lines[0].startsWith('## ')) return <h3 key={index}>{lines[0].slice(3)}</h3>
+    if (lines.every(line => /^[-*] /.test(line))) return <ul key={index}>{lines.map(line => <li>{line.slice(2)}</li>)}</ul>
+    if (lines.every(line => /^\d+\. /.test(line))) return <ol key={index}>{lines.map(line => <li>{line.replace(/^\d+\. /, '')}</li>)}</ol>
+    return <p key={index}>{lines.join('\n')}</p>
+  })}</article>
+}
+
 function Ocr() {
-  const [file, setFile] = useState<File | null>(null); const [busy, setBusy] = useState(false); const [result, setResult] = useState<{ task: string; files: string[]; markdown: string } | null>(null); const input = useRef<HTMLInputElement>(null)
-  const run = async (e: Event) => { e.preventDefault(); if (!file) return; setBusy(true); const body = new FormData(); body.append('file', file); try { setResult(await api('ocr', { method: 'POST', body })) as any } finally { setBusy(false) } }
-  return <section class="page"><div class="intro"><span>文档 OCR</span><h2>版面、阅读顺序和内容，一次解析。</h2><p>PDF、PNG、JPG、WEBP、BMP、TIFF，最大 100 MiB。</p></div><form onSubmit={run}><button type="button" class={`dropzone ${file ? 'chosen' : ''}`} onClick={() => input.current?.click()}><input ref={input} type="file" hidden accept=".pdf,image/*" onChange={e => setFile((e.target as HTMLInputElement).files?.[0] || null)}/><span class="upload-icon">↑</span><b>{file ? file.name : '选择文档或拖入这里'}</b><small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MiB` : '首次使用可能需要加载 OCR 模型'}</small></button><button disabled={!file || busy}>{busy ? '正在解析…' : '开始解析'}</button></form>{result && <div class="ocr-result"><div class="output-head"><div><strong>解析完成</strong><span>{result.files.length} 个产物</span></div><div class="downloads">{result.files.map(name => <a href={`/ui/api/ocr/${result.task}/${encodeURIComponent(name)}`}>下载 {name}</a>)}</div></div><pre>{result.markdown || '该页未识别出可显示的 Markdown，仍可下载完整产物。'}</pre></div>}</section>
+  const [file, setFile] = useState<File | null>(null); const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ task: string; files: string[]; markdown: string } | null>(null)
+  const [preview, setPreview] = useState<'result' | 'layout' | 'raw'>('result'); const input = useRef<HTMLInputElement>(null)
+  const run = async (e: Event) => { e.preventDefault(); if (!file) return; setBusy(true); const body = new FormData(); body.append('file', file); try { setResult(await api('ocr', { method: 'POST', body }) as { task: string; files: string[]; markdown: string }); setPreview('result') } finally { setBusy(false) } }
+  const layout = result?.files.find(name => /_layout_det_res\.(png|jpe?g|webp)$/i.test(name))
+  const fileUrl = (name: string) => `/ui/api/ocr/${result!.task}/${encodeURIComponent(name)}`
+  return <section class="page"><div class="intro"><span>文档 OCR</span><h2>版面、阅读顺序和内容，一次解析。</h2><p>PDF、PNG、JPG、WEBP、BMP、TIFF，最大 100 MiB。</p></div><form onSubmit={run}><button type="button" class={`dropzone ${file ? 'chosen' : ''}`} onClick={() => input.current?.click()}><input ref={input} type="file" hidden accept=".pdf,image/*" onChange={e => setFile((e.target as HTMLInputElement).files?.[0] || null)}/><span class="upload-icon">↑</span><b>{file ? file.name : '选择文档或拖入这里'}</b><small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MiB` : '首次使用可能需要加载 OCR 模型'}</small></button><button disabled={!file || busy}>{busy ? '正在解析…' : '开始解析'}</button></form>{result && <div class="ocr-result"><div class="output-head"><div><strong>解析完成</strong><span>{result.files.length} 个产物</span></div><div class="downloads">{result.files.map(name => <a href={fileUrl(name)}>下载 {name}</a>)}</div></div><div class="preview-tabs"><button class={preview === 'result' ? 'selected' : ''} onClick={() => setPreview('result')}>内容预览</button>{layout && <button class={preview === 'layout' ? 'selected' : ''} onClick={() => setPreview('layout')}>版面标注</button>}<button class={preview === 'raw' ? 'selected' : ''} onClick={() => setPreview('raw')}>原始 Markdown</button></div>{preview === 'result' && <MarkdownPreview source={result.markdown}/>} {preview === 'layout' && layout && <figure class="layout-preview"><img src={fileUrl(layout)} alt="OCR layout detection result"/><figcaption>蓝框表示 PaddleOCR 检测到的版面区域。</figcaption></figure>} {preview === 'raw' && <pre>{result.markdown || '未生成 Markdown'}</pre>}</div>}</section>
 }
 
 function SettingsPanel({ settings, onSaved }: { settings: Settings; onSaved: (settings: Settings) => void }) {

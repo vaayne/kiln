@@ -37,7 +37,7 @@ cd ~/workspace/kiln
 
 ## WebUI
 
-运行 `./kiln ui` 会在浏览器打开 `/ui`。它是 Preact 单页应用，支持多轮流式对话、浏览器会话历史、向量 JSON 下载、OCR 产物下载和设置脏状态；设置写入 `~/.config/kiln/config.toml`，点击“应用并重启”后才会重建 MLX worker。浏览器不接触 API key。
+运行 `./kiln ui` 会在浏览器打开 `/ui`。它是 Preact 单页应用，支持多轮流式对话、浏览器会话历史、向量 JSON 下载、OCR 内容/版面标注图预览与产物下载和设置脏状态；设置写入 `~/.config/kiln/config.toml`，点击“应用并重启”后才会重建 MLX worker。浏览器不接触 API key。
 
 ## 服务布局
 
