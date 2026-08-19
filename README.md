@@ -37,7 +37,7 @@ cd ~/workspace/kiln
 
 ## WebUI
 
-运行 `./kiln ui` 会在浏览器打开 `/ui`。它是 Preact 单页应用，支持多轮流式对话、浏览器会话历史、向量 JSON 下载、OCR 内容/版面标注图预览与产物下载和设置脏状态；设置写入 `~/.config/kiln/config.toml`，点击“应用并重启”后才会重建 MLX worker。浏览器不接触 API key。
+运行 `./kiln ui` 会在浏览器打开 `/ui`。它是 React + assistant-ui 单页应用，支持多轮流式对话、取消、编辑与重新生成、向量 JSON 下载、OCR 内容/版面标注图预览与产物下载和设置脏状态；设置写入 `~/.config/kiln/config.toml`，点击“应用并重启”后才会重建 MLX worker。浏览器不接触 API key。
 
 ## 服务布局
 
@@ -93,7 +93,7 @@ model    = mlx-community/Qwen3.8-27B-4bit
 | `~/.config/kiln/config.toml` | 模型与运行参数的唯一可编辑来源，WebUI 安全地读写它 |
 | `config.sh` | 将 `~/.config/kiln/config.toml` 统一导出给 shell 消费者；只放路径和密钥文件位置 |
 | `kiln_server.py` | `:8007` 网关、`/ui` 和私有 MLX worker supervisor |
-| `ui/` | Preact + Vite 源码；`ui/dist/` 是被 gateway 服务的已构建静态产物 |
+| `ui/` | React + assistant-ui + Vite 源码；`ui/dist/` 是被 gateway 服务的已构建静态产物 |
 | `kiln` | 统一命令入口 |
 | `verify.sh` | 回归验收，改动后跑它 |
 | `install.sh` | 安装依赖并注册 launchd |

@@ -10,7 +10,7 @@ launchd 管理一个 `kiln serve` gateway，label `local.kiln.server`。它独�
 
 完整 OCR 不直接请求 VLM。PaddleOCR 在 CPU 上负责版面检测、阅读顺序和结果保存，MLX-VLM 只作为识别后端，这是 PaddleOCR 官方的 Apple Silicon 集成方式。
 
-模型和运行参数只在 `~/.config/kiln/config.toml` 定义，`config.sh` 只导出它给 shell。`kiln_server.py` 同时从它读取 gateway 和 worker 配置。WebUI 只能经验证、原子写入 `~/.config/kiln/config.toml`，绝不能读、返回或写入 API key。前端是 `ui/` 下的 Preact + Vite，提交源码和 `ui/dist/`，运行时不引入 Node。
+模型和运行参数只在 `~/.config/kiln/config.toml` 定义，`config.sh` 只导出它给 shell。`kiln_server.py` 同时从它读取 gateway 和 worker 配置。WebUI 只能经验证、原子写入 `~/.config/kiln/config.toml`，绝不能读、返回或写入 API key。前端是 `ui/` 下的 React + assistant-ui + Vite，提交源码和 `ui/dist/`，运行时不引入 Node。
 
 ## 不要做
 
