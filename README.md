@@ -84,18 +84,18 @@ model    = mlx-community/Qwen3.8-27B-4bit
 
 | 文件 | 用途 |
 | --- | --- |
+| `config.sh` | 端口、模型名和路径的唯一来源 |
 | `mlx-local` | 统一命令入口 |
+| `start-qwen38-mtp.sh` | 唯一的 MLX-VLM HTTP server 启动脚本和调优参数 |
 | `install.sh` | 安装依赖并注册 launchd |
-| `start-qwen38-mtp.sh` | Agent 服务启动脚本 |
-| `start-qwen38-mtp.sh` | 唯一的 MLX-VLM HTTP server 启动脚本 |
 | `launchd/*.plist.in` | launchd 模板，安装时展开到 `~/Library/LaunchAgents` |
-| `config.sh` | 模型、端口和环境路径配置 |
+| `AGENTS.md` | 改动这套东西时的约定和陷阱 |
 
-## 注意
+## 内存与延迟
 
-这是一个 HTTP server，不是三个常驻服务。Agent 模型启动时预加载；Embedding 和 OCR 通过请求中的模型名动态加载，平时不额外占用模型内存。生成模型切换时服务会重建 worker，通常会有约 10~15 秒冷启动窗口；`mlx-local` 会自动重试。首次调用 Embedding/OCR 之外，切回 Agent 也可能触发这段延迟。
+这是一个 HTTP server，不是三个常驻服务，平时只有 Agent 模型占内存。代价是同一时刻只保留一个生成模型：交替使用 chat 和 OCR 时，每次切换都要重建 worker，大约 10~15 秒。`mlx-local` 会自动等待重试，用别的客户端直连 API 则需要自己重试。
 
-如果内存压力变高，先释放按需加载的模型，退回到只保留 Agent：
+内存压力变高时，先释放按需加载的模型，退回到只保留 Agent：
 
 ```bash
 ./mlx-local unload
@@ -107,4 +107,4 @@ model    = mlx-community/Qwen3.8-27B-4bit
 ./mlx-local service stop
 ```
 
-`api-key` 不进入仓库，也不要写入日志或文档。
+`api-key` 不进入仓库，也不要写入日志或文档。改动这套配置前先读 `AGENTS.md`。

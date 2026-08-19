@@ -12,8 +12,8 @@ RETRIES=12
 RETRY_SLEEP=3
 
 usage() {
-  cat <<'EOF'
-mlx-local, local MLX capability hub on http://127.0.0.1:8007
+  cat <<EOF
+mlx-local, local MLX capability hub on $MLX_URL
 
 Usage:
   mlx-local chat "message"           agent reply (reads stdin when no argument)
@@ -189,28 +189,28 @@ cmd_unload() {
 
 cmd_doctor() {
   local rc=0 health name bin
-  for name bin in "server binary " "$MLX_VLM_SERVER_BIN" "paddleocr     " "$MLX_PADDLEOCR_BIN"; do
+  for name bin in "server binary" "$MLX_VLM_SERVER_BIN" paddleocr "$MLX_PADDLEOCR_BIN"; do
     if [[ -x "$bin" ]]; then
-      print "ok       $name $bin"
+      printf 'ok       %-14s %s\n' "$name" "$bin"
     else
-      print "MISSING  $name $bin"
+      printf 'MISSING  %-14s %s\n' "$name" "$bin"
       rc=1
     fi
   done
   if health="$(api_curl "$MLX_URL/health" 2>/dev/null)"; then
-    print "ok       server         $MLX_URL"
+    printf 'ok       %-14s %s\n' server "$MLX_URL"
     python3 - "$health" <<'PY'
 import json, sys
 health = json.loads(sys.argv[1])
 loaded = health.get("loaded_models") or {}
 for kind, info in loaded.items():
-    print("         loaded         %s: %s" % (kind, info.get("model")))
+    print("         %-14s %s: %s" % ("loaded", kind, info.get("model")))
 if not loaded:
-    print("         loaded         none")
-print("         context        %s" % health.get("effective_context_limit"))
+    print("         %-14s none" % "loaded")
+print("         %-14s %s" % ("context", health.get("effective_context_limit")))
 PY
   else
-    print "DOWN     server         $MLX_URL"
+    printf 'DOWN     %-14s %s\n' server "$MLX_URL"
     rc=1
   fi
   return $rc

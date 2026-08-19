@@ -3,7 +3,6 @@ api-key
 .DS_Store
 __pycache__/
 .venv-paddleocr/
-output/
+ocr-output/
 test-data/
-test-output/
 test-output*/
