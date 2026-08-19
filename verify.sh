@@ -4,7 +4,7 @@
 set -uo pipefail
 
 source "${0:A:h}/config.sh"
-CLI="$MLX_VLM_ROOT/mlx-local"
+CLI="$MLX_ROOT/mlx-local"
 
 failures=0
 pass() { print "  ok    $*" }
@@ -26,10 +26,10 @@ expect_error() {
 }
 
 print "syntax"
-for f in "$MLX_VLM_ROOT"/*.sh "$CLI"; do
+for f in "$MLX_ROOT"/*.sh "$CLI"; do
   check "${f:t}" zsh -n "$f"
 done
-for f in "$MLX_VLM_ROOT"/launchd/*.plist.in; do
+for f in "$MLX_ROOT"/launchd/*.plist.in; do
   check "${f:t}" plutil -lint "$f"
 done
 

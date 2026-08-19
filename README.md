@@ -7,7 +7,7 @@
 需要 macOS、Apple Silicon、[uv](https://docs.astral.sh/uv/) 和网络访问 Hugging Face。
 
 ```bash
-cd ~/.config/mlx-vlm
+cd ~/workspace/mlx-local
 ./install.sh
 ```
 
@@ -76,7 +76,7 @@ Agent 客户端可直接使用 OpenAI-compatible 配置：
 
 ```text
 base_url = http://127.0.0.1:8007/v1
-api_key  = <~/.config/mlx-vlm/api-key 的内容>
+api_key  = <~/.config/mlx-local/api-key 的内容>
 model    = mlx-community/Qwen3.8-27B-4bit
 ```
 
@@ -86,7 +86,7 @@ model    = mlx-community/Qwen3.8-27B-4bit
 | --- | --- |
 | `config.sh` | 端口、模型名和路径的唯一来源 |
 | `mlx-local` | 统一命令入口 |
-| `start-qwen38-mtp.sh` | 唯一的 MLX-VLM HTTP server 启动脚本和调优参数 |
+| `verify.sh` | 回归验收，改动后跑它 |
 | `install.sh` | 安装依赖并注册 launchd |
 | `launchd/*.plist.in` | launchd 模板，安装时展开到 `~/Library/LaunchAgents` |
 | `AGENTS.md` | 改动这套东西时的约定和陷阱 |
@@ -107,4 +107,4 @@ model    = mlx-community/Qwen3.8-27B-4bit
 ./mlx-local service stop
 ```
 
-`api-key` 不进入仓库，也不要写入日志或文档。改动这套配置前先读 `AGENTS.md`。
+`api-key` 存放在 `~/.config/mlx-local/api-key`，不进入仓库，也不要写入日志或文档。改动这套配置前先读 `AGENTS.md`。

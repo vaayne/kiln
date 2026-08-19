@@ -26,13 +26,13 @@ print "[4/5] Installing the PaddleOCR document parser..."
   python-docx
 
 print "[5/5] Installing the launchd service..."
-mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-ln -sf "$MLX_VLM_ROOT/mlx-local" "$HOME/.local/bin/mlx-local"
+mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" "${MLX_API_KEY_FILE:h}"
+ln -sf "$MLX_ROOT/mlx-local" "$HOME/.local/bin/mlx-local"
 
 domain="gui/$(id -u)"
 plist="$HOME/Library/LaunchAgents/$MLX_LABEL.plist"
-sed -e "s|__ROOT__|$MLX_VLM_ROOT|g" -e "s|__HOME__|$HOME|g" \
-  "$MLX_VLM_ROOT/launchd/$MLX_LABEL.plist.in" > "$plist"
+sed -e "s|__ROOT__|$MLX_ROOT|g" -e "s|__HOME__|$HOME|g" \
+  "$MLX_ROOT/launchd/$MLX_LABEL.plist.in" > "$plist"
 launchctl bootout "$domain/$MLX_LABEL" 2>/dev/null || true
 # launchd needs a moment to release the label before it can be bootstrapped again.
 sleep 1

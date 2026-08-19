@@ -24,10 +24,34 @@ Usage:
   mlx-local unload                   drop on-demand models, back to agent only
   mlx-local service {start|stop|restart|status}
   mlx-local install
+  mlx-local serve                    run the server in the foreground
 
 The agent model is preloaded; embedding and OCR models load on first use. Only
 one generation model stays resident, so alternating chat and OCR pays a reload.
 EOF
+}
+
+# launchd's entry point. Tuned for a 48GB M5 Pro; read AGENTS.md before changing
+# any of these, several interact badly.
+cmd_serve() {
+  export PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  export MLX_VLM_SERVER_API_KEY="$(< "$MLX_API_KEY_FILE")"
+  exec "$MLX_SERVER_BIN" \
+    --host "$MLX_HOST" \
+    --port "$MLX_PORT" \
+    --model "$MLX_AGENT_MODEL" \
+    --draft-model "$MLX_AGENT_DRAFT_MODEL" \
+    --draft-kind mtp \
+    --draft-block-size 3 \
+    --kv-bits 8 \
+    --quantized-kv-start 2048 \
+    --max-kv-size 65536 \
+    --enable-thinking \
+    --max-tokens 16384 \
+    --prefill-step-size 2048 \
+    --vision-cache-size 4 \
+    --max-num-seqs 1 \
+    --log-progress-interval 50
 }
 
 api_curl() {
@@ -189,7 +213,7 @@ cmd_unload() {
 
 cmd_doctor() {
   local rc=0 health name bin
-  for name bin in "server binary" "$MLX_VLM_SERVER_BIN" paddleocr "$MLX_PADDLEOCR_BIN"; do
+  for name bin in "server binary" "$MLX_SERVER_BIN" paddleocr "$MLX_PADDLEOCR_BIN"; do
     if [[ -x "$bin" ]]; then
       printf 'ok       %-14s %s\n' "$name" "$bin"
     else
@@ -218,6 +242,7 @@ PY
 
 case "${1:-help}" in
   install) exec "$ROOT/install.sh" ;;
+  serve) cmd_serve ;;
   doctor) cmd_doctor ;;
   service) shift; service_action "${1:-status}" ;;
   chat) shift; run_with_text chat "$MLX_AGENT_MODEL" "$@" ;;
