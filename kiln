@@ -19,13 +19,14 @@ Usage:
   kiln chat "message"           agent reply (reads stdin when no argument)
   kiln embed "text"             embedding JSON (reads stdin when no argument)
   kiln ocr FILE [--output DIR]  document parse to md, json, docx, layout png
+  kiln config show              print validated, secret-free settings
+  kiln config set KEY VALUE     validate, save, and restart after a setting change
   kiln doctor                   binaries, server health, loaded models
   kiln logs [-f] [-n LINES]     server log
   kiln unload                   drop on-demand models, back to agent only
   kiln service {start|stop|restart|status}
   kiln install
   kiln serve                    run gateway and MLX worker in the foreground
-  kiln ui                       open the local WebUI
 
 The agent model is preloaded; embedding and OCR models load on first use. Only
 one generation model stays resident, so alternating chat and OCR pays a reload.
@@ -33,20 +34,11 @@ EOF
 }
 
 # launchd's entry point. The gateway owns the public port and supervises the
-# MLX worker on KILN_UPSTREAM_PORT, so /ui and /v1 share one external address.
+# MLX worker on KILN_UPSTREAM_PORT, so the OpenAI-compatible API stays behind
+# one external address.
 cmd_serve() {
   export PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   exec "$KILN_PYTHON" "$KILN_ROOT/kiln_server.py"
-}
-
-cmd_ui() {
-  local response url
-  response="$(api_curl -X POST "$KILN_URL/ui/api/session")" || die "Kiln is not running; run: kiln service start"
-  url="$(
-    "$KILN_PYTHON" -c 'import json, sys; print(json.loads(sys.argv[1])["url"])' "$response"
-  )" || die "could not open a WebUI session"
-  open "$url"
-  print "Opened: $KILN_URL/ui"
 }
 
 api_curl() {
@@ -206,6 +198,22 @@ cmd_unload() {
   die "server did not come back after unload"
 }
 
+cmd_config() {
+  case "${1:-show}" in
+    show)
+      (( $# <= 1 )) || die "usage: kiln config show"
+      "$KILN_PYTHON" "$KILN_ROOT/kiln_config.py" show "$KILN_CONFIG_FILE"
+      ;;
+    set)
+      (( $# == 3 )) || die "usage: kiln config set SECTION.KEY VALUE"
+      "$KILN_PYTHON" "$KILN_ROOT/kiln_config.py" set "$KILN_CONFIG_FILE" "$2" "$3" || die "could not save configuration"
+      print "Saved $2. Restarting Kiln so the worker uses the new setting..."
+      service_action restart
+      ;;
+    *) die "usage: kiln config {show|set}" ;;
+  esac
+}
+
 cmd_doctor() {
   local rc=0 health name bin
   for name bin in "server binary" "$MLX_SERVER_BIN" paddleocr "$KILN_PADDLEOCR_BIN"; do
@@ -238,7 +246,7 @@ PY
 case "${1:-help}" in
   install) exec "$ROOT/install.sh" ;;
   serve) cmd_serve ;;
-  ui) cmd_ui ;;
+  config) shift; cmd_config "$@" ;;
   doctor) cmd_doctor ;;
   service) shift; service_action "${1:-status}" ;;
   chat) shift; run_with_text chat "$KILN_AGENT_MODEL" "$@" ;;

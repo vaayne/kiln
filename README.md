@@ -1,6 +1,6 @@
 # Kiln
 
-一个面向 Apple Silicon 的本地 AI 能力包：Chat、Embedding、PaddleOCR-VL 文档解析和本地 WebUI 统一由 launchd 管理。
+一个面向 Apple Silicon 的本地 AI 能力包：Chat、Embedding 和 PaddleOCR-VL 文档解析，由 launchd 管理的纯 CLI 本地 AI 能力包。
 
 ## 安装
 
@@ -24,7 +24,8 @@ cd ~/workspace/kiln
 
 ```bash
 ./kiln doctor
-./kiln ui                 # 打开 http://127.0.0.1:8007/ui
+./kiln config show
+./kiln config set runtime.enable_thinking false
 ./kiln chat '解释一下什么是 RAG'
 ./kiln embed '这段文字用于向量检索'
 ./kiln ocr ./invoice.pdf
@@ -35,15 +36,23 @@ cd ~/workspace/kiln
 
 `doctor` 会列出服务当前实际加载了哪些模型，是判断内存占用的第一手依据。`ocr` 默认输出到当前目录的 `./ocr-output`，可用 `--output` 指定。
 
-## WebUI
+## CLI 配置
 
-运行 `./kiln ui` 会在浏览器打开 `/ui`。它是 React + assistant-ui + Streamdown 单页应用，支持多轮流式对话、取消、编辑与重新生成、向量 JSON 下载、OCR 内容/版面标注图预览与产物下载和设置脏状态；设置写入 `~/.config/kiln/config.toml`，点击“应用并重启”后才会重建 MLX worker。浏览器不接触 API key。
+`kiln config show` 打印经过校验、且不包含密钥的 TOML 配置。`kiln config set SECTION.KEY VALUE` 只允许修改 `models.*` 和 `runtime.*`，原子写入 `~/.config/kiln/config.toml` 后立即重启 Kiln，让 worker 确实使用新值。布尔值和数字使用 JSON 写法，例如 `false`、`8`；模型 ID 直接传字符串。
+
+```bash
+kiln config set models.agent mlx-community/Qwen3.8-27B-4bit
+kiln config set runtime.max_kv_size 32768
+kiln config set runtime.enable_thinking false
+```
+
+服务重启会让请求短暂失败约 10~15 秒。`server.*` 固定为本地单端口布局，不可经此命令修改。
 
 ## 服务布局
 
 | 能力 | 地址 | 后端 |
 | --- | --- | --- |
-| WebUI / API gateway | `127.0.0.1:8007/ui` / `:8007/v1/*` | FastAPI，唯一公开端口 |
+| API gateway | `127.0.0.1:8007/v1/*` | FastAPI，唯一公开端口 |
 | Agent / Chat | `127.0.0.1:8007/v1/chat/completions` | Qwen3.8-27B + MTP |
 | Embedding | `127.0.0.1:8007/v1/embeddings` | Qwen3-Embedding-4B，按需加载 |
 | OCR VLM | `127.0.0.1:8007/v1/chat/completions` | PaddleOCR-VL-1.6，按需加载 |
@@ -52,7 +61,7 @@ OCR 不是直接请求 VLM。完整流程由 PaddleOCR 在 CPU 上负责版面�
 
 ## HTTP endpoints
 
-公开 API 都在 `127.0.0.1:8007`，需要 `api-key`。`/ui` 则通过 `kiln ui` 创建的短期浏览器会话访问：
+公开 API 都在 `127.0.0.1:8007`，需要 `api-key`：
 
 ```bash
 curl -H "Authorization: Bearer $(< api-key)" http://127.0.0.1:8007/health
@@ -90,10 +99,9 @@ model    = mlx-community/Qwen3.8-27B-4bit
 
 | 文件 | 用途 |
 | --- | --- |
-| `~/.config/kiln/config.toml` | 模型与运行参数的唯一可编辑来源，WebUI 安全地读写它 |
+| `~/.config/kiln/config.toml` | 模型与运行参数的唯一来源，由 `kiln config` 校验并原子写入 |
 | `config.sh` | 将 `~/.config/kiln/config.toml` 统一导出给 shell 消费者；只放路径和密钥文件位置 |
-| `kiln_server.py` | `:8007` 网关、`/ui` 和私有 MLX worker supervisor |
-| `ui/` | React + assistant-ui + Streamdown + Vite 源码；`ui/dist/` 是被 gateway 服务的已构建静态产物 |
+| `kiln_server.py` | `:8007` API gateway 和私有 MLX worker supervisor |
 | `kiln` | 统一命令入口 |
 | `verify.sh` | 回归验收，改动后跑它 |
 | `install.sh` | 安装依赖并注册 launchd |
@@ -117,16 +125,3 @@ model    = mlx-community/Qwen3.8-27B-4bit
 ```
 
 `api-key` 存放在 `~/.config/kiln/api-key`，不进入仓库，也不要写入日志或文档。改动这套配置前先读 `AGENTS.md`。
-
-## WebUI 开发
-
-运行时不需要 Node。修改 UI 时才需要 Node 24+：
-
-```bash
-npm --prefix ui install
-npm --prefix ui run check
-npm --prefix ui run build
-./kiln service restart
-```
-
-`ui/dist/` 必须和源码一起提交，否则本地 gateway 没有可服务的页面。

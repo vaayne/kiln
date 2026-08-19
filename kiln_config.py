@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validated, secret-free configuration shared by the shell CLI and WebUI."""
+"""Validated, secret-free configuration shared by the shell CLI and gateway."""
 from __future__ import annotations
 
 import json
@@ -102,7 +102,7 @@ def _toml_value(value: Any) -> str:
 
 def render(config: dict[str, dict[str, Any]]) -> str:
     lines = [
-        "# Kiln's user-editable settings. The WebUI validates and rewrites this file.",
+        "# Kiln's user-editable settings. `kiln config set` validates and rewrites this file.",
         "# Secrets remain in ~/.config/kiln/api-key and never belong here.",
         "",
     ]
@@ -123,17 +123,20 @@ def write(path: str | Path, config: dict[str, Any]) -> dict[str, dict[str, Any]]
     return normalized
 
 
-def merge(current: dict[str, dict[str, Any]], update: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    if not isinstance(update, dict) or set(update) - {"models", "runtime"}:
-        raise ValueError("only models and runtime can be changed from the WebUI")
-    merged = _copy_defaults()
-    for section in merged:
-        merged[section].update(current[section])
-    for section, values in update.items():
-        if not isinstance(values, dict) or set(values) - set(merged[section]):
-            raise ValueError(f"invalid {section} update")
-        merged[section].update(values)
-    return validate(merged)
+def set_value(current: dict[str, dict[str, Any]], dotted_key: str, raw_value: str) -> dict[str, dict[str, Any]]:
+    """Update one CLI-safe setting without exposing network binding controls."""
+    section, separator, key = dotted_key.partition(".")
+    if not separator or section not in {"models", "runtime"} or key not in current[section]:
+        raise ValueError("setting must be a models.* or runtime.* key; run `kiln config show`")
+    try:
+        value = json.loads(raw_value)
+    except json.JSONDecodeError:
+        value = raw_value
+    updated = _copy_defaults()
+    for name, values in current.items():
+        updated[name].update(values)
+    updated[section][key] = value
+    return validate(updated)
 
 
 def shell_exports(config: dict[str, dict[str, Any]]) -> str:
@@ -159,6 +162,13 @@ def shell_exports(config: dict[str, dict[str, Any]]) -> str:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] != "shell":
-        raise SystemExit("usage: kiln_config.py shell CONFIG.toml")
-    print(shell_exports(load(sys.argv[2])))
+    command = sys.argv[1:]
+    if len(command) == 2 and command[0] == "shell":
+        print(shell_exports(load(command[1])))
+    elif len(command) == 2 and command[0] == "show":
+        print(render(load(command[1])), end="")
+    elif len(command) == 4 and command[0] == "set":
+        path, dotted_key, raw_value = command[1:]
+        write(path, set_value(load(path), dotted_key, raw_value))
+    else:
+        raise SystemExit("usage: kiln_config.py {shell|show} CONFIG.toml | set CONFIG.toml SECTION.KEY VALUE")

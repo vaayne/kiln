@@ -10,7 +10,7 @@ if [[ -z "$UV" ]]; then
 fi
 
 print "[1/5] Installing MLX-VLM and Kiln gateway dependencies..."
-"$UV" tool install --force --with jinja2 --with "fastapi>=0.115" --with "uvicorn[standard]>=0.30" --with "httpx>=0.27" --with "python-multipart>=0.0.9" mlx-vlm@latest
+"$UV" tool install --force --with jinja2 --with "fastapi>=0.115" --with "uvicorn[standard]>=0.30" --with "httpx>=0.27" mlx-vlm@latest
 
 print "[2/5] Creating the isolated PaddleOCR environment..."
 "$UV" venv --allow-existing --python 3.12 "$KILN_PADDLE_ENV"

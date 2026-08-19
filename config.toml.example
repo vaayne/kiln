@@ -1,4 +1,4 @@
-# Kiln's user-editable settings. The WebUI validates and rewrites this file.
+# Kiln's user-editable settings. `kiln config set` validates and rewrites this file.
 # Secrets remain in ~/.config/kiln/api-key and never belong here.
 
 [server]

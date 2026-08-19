@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Shell bridge for config.toml. Paths and secrets stay here; user settings live
-# in TOML so the CLI, launchd and WebUI read exactly the same values.
+# in TOML so the CLI, launchd and gateway read exactly the same values.
 
 export KILN_ROOT="${KILN_ROOT:-$(cd "$(dirname "${(%):-%N}")" && pwd)}"
 export KILN_CONFIG_FILE="${KILN_CONFIG_FILE:-$HOME/.config/kiln/config.toml}"

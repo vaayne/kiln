@@ -1,0 +1,39 @@
+{
+  "skill_name": "kiln-cli",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "用我的本地 Kiln 模型把下面这段发布说明压成 3 条中文要点：Kiln 现在支持文档 OCR，模型按需加载，切换 OCR 和聊天约要等 15 秒。",
+      "expected_output": "Checks service safely, invokes kiln chat without exposing secrets, and returns the concise Chinese result.",
+      "files": [],
+      "expectations": [
+        "Checks availability with `kiln doctor` before the generation command.",
+        "Uses `kiln chat` for the requested local-model summary.",
+        "Does not expose or request the API key."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "帮我把 /Users/vaayne/Documents/invoice.pdf 用本机模型 OCR，结果放到 ~/Desktop/invoice-ocr。开始前告诉我会不会影响正在跑的聊天。",
+      "expected_output": "Explains model-switch interruption, runs kiln ocr with an explicit output directory, and reports the artifacts without inventing file contents.",
+      "files": [],
+      "expectations": [
+        "States that OCR may switch the resident generation model and cost about 10–15 seconds to resume chat.",
+        "Uses `kiln ocr` with `/Users/vaayne/Documents/invoice.pdf` and `--output ~/Desktop/invoice-ocr`.",
+        "Does not fabricate OCR contents or delete the requested output directory."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "把 Kiln 的 thinking 关掉，顺便确认下服务有没有起来。",
+      "expected_output": "Uses doctor and kiln config set runtime.enable_thinking false, explains the restart window, and never edits TOML or exposes the key.",
+      "files": [],
+      "expectations": [
+        "Uses `kiln doctor` to inspect service state.",
+        "Uses `kiln config set runtime.enable_thinking false`, not a direct TOML edit.",
+        "Warns that the setting restarts Kiln and briefly interrupts requests.",
+        "Does not expose or request the API key."
+      ]
+    }
+  ]
+}

@@ -4,13 +4,13 @@ Apple Silicon 上的本地 AI 能力包。安装、命令和 endpoint 见 `READM
 
 ## 架构不变量
 
-launchd 管理一个 `kiln serve` gateway，label `local.kiln.server`。它独占公开 `127.0.0.1:8007`，服务 `/ui` 并原样代理 `/v1/*`、`/health`、`/unload` 给私有 `127.0.0.1:8017` 的唯一 `mlx_vlm.server` worker。Agent 的 Qwen 启动时预加载；Embedding 和 OCR 靠请求里的模型名按需加载。
+launchd 管理一个 `kiln serve` gateway，label `local.kiln.server`。它独占公开 `127.0.0.1:8007`，原样代理 `/v1/*`、`/health`、`/unload` 给私有 `127.0.0.1:8017` 的唯一 `mlx_vlm.server` worker。Agent 的 Qwen 启动时预加载；Embedding 和 OCR 靠请求里的模型名按需加载。
 
 切换生成模型时 server 会重建 worker，约 10~15 秒内连接被拒。`kiln` 各命令统一重试 12 次 x 3 秒，直接调 HTTP API 的客户端也必须自己重试。
 
 完整 OCR 不直接请求 VLM。PaddleOCR 在 CPU 上负责版面检测、阅读顺序和结果保存，MLX-VLM 只作为识别后端，这是 PaddleOCR 官方的 Apple Silicon 集成方式。
 
-模型和运行参数只在 `~/.config/kiln/config.toml` 定义，`config.sh` 只导出它给 shell。`kiln_server.py` 同时从它读取 gateway 和 worker 配置。WebUI 只能经验证、原子写入 `~/.config/kiln/config.toml`，绝不能读、返回或写入 API key。前端是 `ui/` 下的 React + assistant-ui + Streamdown + Vite，提交源码和 `ui/dist/`，运行时不引入 Node。
+模型和运行参数只在 `~/.config/kiln/config.toml` 定义，`config.sh` 只导出它给 shell。`kiln_server.py` 同时从它读取 gateway 和 worker 配置。`kiln config set` 是配置的唯一写入入口，只允许模型和运行参数，经校验后原子写入 `~/.config/kiln/config.toml` 并重启服务。它绝不能读、返回或写入 API key。Kiln 不提供浏览器 UI，也不保留 Node 前端构建链。
 
 ## 不要做
 
@@ -26,7 +26,7 @@ launchd 管理一个 `kiln serve` gateway，label `local.kiln.server`。它独�
 
 ## 验证
 
-改完跑 `./verify.sh`，它覆盖 gateway、WebUI 会话、chat、embedding、OCR 四类产物、模型切换恢复和错误路径，全绿才算完。不要只看进程是否存在。`doctor` 会打印服务实际加载了哪些模型分组，排查内存和模型切换问题先看它。
+改完跑 `./verify.sh`，它覆盖 gateway、chat、embedding、OCR 四类产物、模型切换恢复、CLI 配置和错误路径，全绿才算完。不要只看进程是否存在。`doctor` 会打印服务实际加载了哪些模型分组，排查内存和模型切换问题先看它。
 
 Agent 短 prompt 基线约 25 tok/s，4.8K prompt 约 22~24 tok/s。比较参数前冷却约 3 分钟并用相同请求，否则会被日常应用内存占用和积热干扰。
 
