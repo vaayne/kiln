@@ -24,7 +24,7 @@ from kiln_config import load, merge, write
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = Path(os.environ["KILN_CONFIG_FILE"])
-UI_DIR = ROOT / "ui"
+UI_DIR = ROOT / "ui" / "dist"
 OCR_ROOT = Path.home() / ".cache" / "kiln" / "ui-ocr"
 SESSION_TTL_SECONDS = 60 * 60
 OCR_TTL_SECONDS = 24 * 60 * 60  # global cache; use per-user jobs if Kiln ever leaves localhost.

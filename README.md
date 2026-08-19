@@ -37,7 +37,7 @@ cd ~/workspace/kiln
 
 ## WebUI
 
-运行 `./kiln ui` 会在浏览器打开 `/ui`。它有 Chat、向量、OCR 和设置四个工作区；设置写入 `~/.config/kiln/config.toml`，点击“应用并重启”后才会重建 MLX worker。浏览器不接触 API key。
+运行 `./kiln ui` 会在浏览器打开 `/ui`。它是 Preact 单页应用，支持多轮流式对话、浏览器会话历史、向量 JSON 下载、OCR 产物下载和设置脏状态；设置写入 `~/.config/kiln/config.toml`，点击“应用并重启”后才会重建 MLX worker。浏览器不接触 API key。
 
 ## 服务布局
 
@@ -93,6 +93,7 @@ model    = mlx-community/Qwen3.8-27B-4bit
 | `~/.config/kiln/config.toml` | 模型与运行参数的唯一可编辑来源，WebUI 安全地读写它 |
 | `config.sh` | 将 `~/.config/kiln/config.toml` 统一导出给 shell 消费者；只放路径和密钥文件位置 |
 | `kiln_server.py` | `:8007` 网关、`/ui` 和私有 MLX worker supervisor |
+| `ui/` | Preact + Vite 源码；`ui/dist/` 是被 gateway 服务的已构建静态产物 |
 | `kiln` | 统一命令入口 |
 | `verify.sh` | 回归验收，改动后跑它 |
 | `install.sh` | 安装依赖并注册 launchd |
@@ -116,3 +117,16 @@ model    = mlx-community/Qwen3.8-27B-4bit
 ```
 
 `api-key` 存放在 `~/.config/kiln/api-key`，不进入仓库，也不要写入日志或文档。改动这套配置前先读 `AGENTS.md`。
+
+## WebUI 开发
+
+运行时不需要 Node。修改 UI 时才需要 Node 24+：
+
+```bash
+npm --prefix ui install
+npm --prefix ui run check
+npm --prefix ui run build
+./kiln service restart
+```
+
+`ui/dist/` 必须和源码一起提交，否则本地 gateway 没有可服务的页面。

@@ -6,3 +6,5 @@ __pycache__/
 ocr-output/
 test-data/
 test-output*/
+
+ui/node_modules/
