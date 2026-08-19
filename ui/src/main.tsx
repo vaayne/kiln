@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
+import { Streamdown } from 'streamdown'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ActionBarPrimitive, AssistantRuntimeProvider, ComposerPrimitive, MessagePrimitive, ThreadPrimitive, useLocalRuntime, type ChatModelAdapter } from '@assistant-ui/react'
+import { ActionBarPrimitive, AssistantRuntimeProvider, AuiIf, ComposerPrimitive, MessagePrimitive, ThreadPrimitive, useAuiState, useLocalRuntime, type ChatModelAdapter } from '@assistant-ui/react'
 import './style.css'
 
 type Tab = 'chat' | 'embed' | 'ocr' | 'settings'
@@ -74,15 +75,25 @@ function createKilnAdapter(model: string): ChatModelAdapter {
   }
 }
 
+function StreamedMarkdown({ children }: { children: string }) {
+  const isAnimating = useAuiState((state) => state.message.status?.type === 'running')
+  return <Streamdown isAnimating={isAnimating}>{children}</Streamdown>
+}
 function UserMessage() {
-  return <MessagePrimitive.Root className="message user"><div className="avatar">你</div><div className="message-body"><div className="role">你</div><div className="content"><MessagePrimitive.Content/></div><ActionBarPrimitive.Root className="message-actions"><ActionBarPrimitive.Edit>编辑</ActionBarPrimitive.Edit></ActionBarPrimitive.Root></div></MessagePrimitive.Root>
+  return <MessagePrimitive.Root className="claude-message user"><div className="claude-user-content"><MessagePrimitive.Parts>{({ part }) => part.type === 'text' ? <StreamedMarkdown>{part.text}</StreamedMarkdown> : null}</MessagePrimitive.Parts></div><ActionBarPrimitive.Root className="claude-actions"><ActionBarPrimitive.Edit>编辑</ActionBarPrimitive.Edit><ActionBarPrimitive.Copy>复制</ActionBarPrimitive.Copy></ActionBarPrimitive.Root></MessagePrimitive.Root>
 }
 function AssistantMessage() {
-  return <MessagePrimitive.Root className="message"><div className="avatar assistant-avatar">K</div><div className="message-body"><div className="role">Kiln</div><div className="content"><MessagePrimitive.Content/></div><ActionBarPrimitive.Root className="message-actions"><ActionBarPrimitive.Copy>复制</ActionBarPrimitive.Copy><ActionBarPrimitive.Reload>重新生成</ActionBarPrimitive.Reload></ActionBarPrimitive.Root></div></MessagePrimitive.Root>
+  return <MessagePrimitive.Root className="claude-message assistant"><div className="claude-assistant-content"><MessagePrimitive.Parts>{({ part }) => part.type === 'text' ? <StreamedMarkdown>{part.text}</StreamedMarkdown> : null}</MessagePrimitive.Parts></div><ActionBarPrimitive.Root className="claude-actions"><ActionBarPrimitive.Copy>复制</ActionBarPrimitive.Copy><ActionBarPrimitive.Reload>重新生成</ActionBarPrimitive.Reload></ActionBarPrimitive.Root></MessagePrimitive.Root>
+}
+function ClaudeComposer() {
+  return <ComposerPrimitive.Root className="claude-composer"><ComposerPrimitive.Input placeholder="问 Kiln 任何事…" rows={1}/><div className="claude-composer-footer"><button type="button" className="claude-model" tabIndex={-1}>Qwen3.8 27B <span>⌄</span></button><div><AuiIf condition={(state) => state.thread.isRunning}><ComposerPrimitive.Cancel className="claude-send cancel" aria-label="停止生成">■</ComposerPrimitive.Cancel></AuiIf><AuiIf condition={(state) => !state.thread.isRunning}><ComposerPrimitive.Send className="claude-send" aria-label="发送">↑</ComposerPrimitive.Send></AuiIf></div></div></ComposerPrimitive.Root>
+}
+function ClaudeEmptyState() {
+  return <div className="claude-empty"><div className="claude-empty-inner"><h2><span>✦</span>今天想做什么？</h2><ClaudeComposer/><div className="claude-modes"><button type="button">✎ 写作</button><button type="button">◈ 分析</button><button type="button">⌘ 代码</button><button type="button">▤ 文档</button></div></div></div>
 }
 function AssistantChat({ model }: { model: string }) {
   const adapter = useMemo(() => createKilnAdapter(model), [model]); const runtime = useLocalRuntime(adapter)
-  return <AssistantRuntimeProvider runtime={runtime}><section className="chat-view"><ThreadPrimitive.Root className="assistant-thread"><ThreadPrimitive.Viewport className="conversation"><ThreadPrimitive.Empty><div className="welcome"><span className="ember">✦</span><h2>本地智能，随时开炉。</h2><p>支持流式对话、取消、编辑与重新生成。</p></div></ThreadPrimitive.Empty><ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }}/><ThreadPrimitive.ViewportFooter className="composer-wrap"><ComposerPrimitive.Root className="composer"><ComposerPrimitive.Input placeholder="问 Kiln 任何事…" autoFocus/><ComposerPrimitive.Cancel>停止</ComposerPrimitive.Cancel><ComposerPrimitive.Send>发送</ComposerPrimitive.Send></ComposerPrimitive.Root></ThreadPrimitive.ViewportFooter></ThreadPrimitive.Viewport></ThreadPrimitive.Root><div className="chat-tools"><span>assistant-ui runtime · 本地模型</span></div></section></AssistantRuntimeProvider>
+  return <AssistantRuntimeProvider runtime={runtime}><section className="chat-view claude-chat"><ThreadPrimitive.Root className="assistant-thread claude-thread"><AuiIf condition={(state) => state.thread.isEmpty}><ClaudeEmptyState/></AuiIf><AuiIf condition={(state) => !state.thread.isEmpty}><ThreadPrimitive.Viewport className="claude-viewport"><ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }}/><ThreadPrimitive.ViewportFooter className="claude-footer"><ClaudeComposer/><p>Kiln 可能出错，请核对重要内容。</p></ThreadPrimitive.ViewportFooter></ThreadPrimitive.Viewport></AuiIf></ThreadPrimitive.Root></section></AssistantRuntimeProvider>
 }
 
 function Embed({ settings }: { settings: Settings }) {

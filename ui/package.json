@@ -3,11 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "scripts": { "build": "vite build", "check": "tsc --noEmit" },
+  "scripts": {
+    "build": "vite build",
+    "check": "tsc --noEmit"
+  },
   "dependencies": {
     "@assistant-ui/react": "^0.15.15",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "streamdown": "^2.5.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.9",
