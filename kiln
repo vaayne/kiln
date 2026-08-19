@@ -13,18 +13,18 @@ RETRY_SLEEP=3
 
 usage() {
   cat <<EOF
-mlx-local, local MLX capability hub on $MLX_URL
+kiln, local AI capability hub on $MLX_URL
 
 Usage:
-  mlx-local chat "message"           agent reply (reads stdin when no argument)
-  mlx-local embed "text"             embedding JSON (reads stdin when no argument)
-  mlx-local ocr FILE [--output DIR]  document parse to md, json, docx, layout png
-  mlx-local doctor                   binaries, server health, loaded models
-  mlx-local logs [-f] [-n LINES]     server log
-  mlx-local unload                   drop on-demand models, back to agent only
-  mlx-local service {start|stop|restart|status}
-  mlx-local install
-  mlx-local serve                    run the server in the foreground
+  kiln chat "message"           agent reply (reads stdin when no argument)
+  kiln embed "text"             embedding JSON (reads stdin when no argument)
+  kiln ocr FILE [--output DIR]  document parse to md, json, docx, layout png
+  kiln doctor                   binaries, server health, loaded models
+  kiln logs [-f] [-n LINES]     server log
+  kiln unload                   drop on-demand models, back to agent only
+  kiln service {start|stop|restart|status}
+  kiln install
+  kiln serve                    run the server in the foreground
 
 The agent model is preloaded; embedding and OCR models load on first use. Only
 one generation model stays resident, so alternating chat and OCR pays a reload.
@@ -143,7 +143,7 @@ run_with_text() {
 }
 
 cmd_ocr() {
-  [[ -x "$MLX_PADDLEOCR_BIN" ]] || die "PaddleOCR is not installed; run: mlx-local install"
+  [[ -x "$MLX_PADDLEOCR_BIN" ]] || die "PaddleOCR is not installed; run: kiln install"
   local input="${1:-}" output="$PWD/ocr-output"
   [[ -n "$input" ]] || die "ocr needs an image or PDF path"
   shift
@@ -158,7 +158,7 @@ cmd_ocr() {
   done
   mkdir -p "$output"
   local log attempt
-  log="$(mktemp -t mlx-local-ocr)"
+  log="$(mktemp -t kiln-ocr)"
   for attempt in {1..$RETRIES}; do
     if "$MLX_PADDLEOCR_BIN" doc_parser \
       --input "$input" \

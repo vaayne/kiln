@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>local.mlx-local.server</string>
+  <key>Label</key><string>local.kiln.server</string>
   <key>ProgramArguments</key><array>
-    <string>/bin/zsh</string><string>__ROOT__/mlx-local</string><string>serve</string>
+    <string>/bin/zsh</string><string>__ROOT__/kiln</string><string>serve</string>
   </array>
   <key>WorkingDirectory</key><string>__HOME__</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
   <key>ProcessType</key><string>Interactive</string>
-  <key>StandardOutPath</key><string>__HOME__/Library/Logs/mlx-local.server.log</string>
-  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/mlx-local.server.log</string>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/kiln.server.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/kiln.server.log</string>
 </dict></plist>

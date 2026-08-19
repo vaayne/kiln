@@ -27,7 +27,7 @@ print "[4/5] Installing the PaddleOCR document parser..."
 
 print "[5/5] Installing the launchd service..."
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" "${MLX_API_KEY_FILE:h}"
-ln -sf "$MLX_ROOT/mlx-local" "$HOME/.local/bin/mlx-local"
+ln -sf "$MLX_ROOT/kiln" "$HOME/.local/bin/kiln"
 
 domain="gui/$(id -u)"
 plist="$HOME/Library/LaunchAgents/$MLX_LABEL.plist"
@@ -42,4 +42,4 @@ launchctl bootstrap "$domain" "$plist" || {
 }
 launchctl kickstart -k "$domain/$MLX_LABEL"
 
-print "Installed. Run: mlx-local doctor"
+print "Installed. Run: kiln doctor"

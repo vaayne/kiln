@@ -4,7 +4,7 @@
 set -uo pipefail
 
 source "${0:A:h}/config.sh"
-CLI="$MLX_ROOT/mlx-local"
+CLI="$MLX_ROOT/kiln"
 
 failures=0
 pass() { print "  ok    $*" }
@@ -60,7 +60,7 @@ else
 fi
 
 print "\nocr (slow, loads a second model)"
-work="$(mktemp -d -t mlx-local-verify)"
+work="$(mktemp -d -t kiln-verify)"
 "$MLX_PADDLE_PYTHON" - "$work/sample.png" <<'PY' 2>/dev/null
 import sys
 from PIL import Image, ImageDraw

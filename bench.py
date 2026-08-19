@@ -3,7 +3,7 @@ import json, os, sys, time, urllib.request
 
 URL = os.environ.get("MLX_URL", "http://127.0.0.1:8007") + "/v1/chat/completions"
 KEY = open(os.path.expanduser(
-    os.environ.get("MLX_API_KEY_FILE", "~/.config/mlx-local/api-key"))).read().strip()
+    os.environ.get("MLX_API_KEY_FILE", "~/.config/kiln/api-key"))).read().strip()
 MODEL = os.environ.get("MLX_AGENT_MODEL", "mlx-community/Qwen3.8-27B-4bit")
 
 SHORT = "请写一篇关于 Apple Silicon 统一内存架构的详细技术文章。"

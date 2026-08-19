@@ -4,13 +4,13 @@ Apple Silicon 上的本地 AI 能力包。安装、命令和 endpoint 见 `READM
 
 ## 架构不变量
 
-只有一个 `mlx_vlm.server` 进程，由 launchd 管理，label `local.mlx-local.server`，入口是 `mlx-local serve`。Agent 的 Qwen 启动时预加载；Embedding 和 OCR 靠请求里的模型名按需加载。同一时刻只有一个生成模型常驻。
+只有一个 `mlx_vlm.server` 进程，由 launchd 管理，label `local.kiln.server`，入口是 `kiln serve`。Agent 的 Qwen 启动时预加载；Embedding 和 OCR 靠请求里的模型名按需加载。同一时刻只有一个生成模型常驻。
 
-切换生成模型时 server 会重建 worker，约 10~15 秒内连接被拒。`mlx-local` 各命令统一重试 12 次 x 3 秒，直接调 HTTP API 的客户端也必须自己重试。
+切换生成模型时 server 会重建 worker，约 10~15 秒内连接被拒。`kiln` 各命令统一重试 12 次 x 3 秒，直接调 HTTP API 的客户端也必须自己重试。
 
 完整 OCR 不直接请求 VLM。PaddleOCR 在 CPU 上负责版面检测、阅读顺序和结果保存，MLX-VLM 只作为识别后端，这是 PaddleOCR 官方的 Apple Silicon 集成方式。
 
-端口、模型名和路径只在 `config.sh` 定义一次，`install.sh`、`mlx-local`、`verify.sh` 都从那里读。server 的启动参数在 `mlx-local serve` 里，launchd 直接调它。不要在任何地方硬编码，两边一旦不一致，server 会静默卸载预加载模型再重载另一个，只表现为"变慢"。
+端口、模型名和路径只在 `config.sh` 定义一次，`install.sh`、`kiln`、`verify.sh` 都从那里读。server 的启动参数在 `kiln serve` 里，launchd 直接调它。不要在任何地方硬编码，两边一旦不一致，server 会静默卸载预加载模型再重载另一个，只表现为"变慢"。
 
 ## 不要做
 

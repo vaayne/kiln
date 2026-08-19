@@ -1,10 +1,10 @@
 #!/bin/zsh
 # The single source of truth for every path, port and model name. install.sh,
-# mlx-local and verify.sh all read from here; nothing below may be duplicated.
+# kiln and verify.sh all read from here; nothing below may be duplicated.
 
 export MLX_ROOT="${MLX_ROOT:-$(cd "$(dirname "${(%):-%N}")" && pwd)}"
 export MLX_SERVER_BIN="${MLX_SERVER_BIN:-$HOME/.local/bin/mlx_vlm.server}"
-export MLX_API_KEY_FILE="${MLX_API_KEY_FILE:-$HOME/.config/mlx-local/api-key}"
+export MLX_API_KEY_FILE="${MLX_API_KEY_FILE:-$HOME/.config/kiln/api-key}"
 
 # One server serves all three capabilities; models are selected per request.
 export MLX_HOST="${MLX_HOST:-127.0.0.1}"
@@ -19,5 +19,5 @@ export MLX_PADDLE_ENV="${MLX_PADDLE_ENV:-$MLX_ROOT/.venv-paddleocr}"
 export MLX_PADDLE_PYTHON="$MLX_PADDLE_ENV/bin/python"
 export MLX_PADDLEOCR_BIN="$MLX_PADDLE_ENV/bin/paddleocr"
 
-export MLX_LABEL="local.mlx-local.server"
-export MLX_LOG="$HOME/Library/Logs/mlx-local.server.log"
+export MLX_LABEL="local.kiln.server"
+export MLX_LOG="$HOME/Library/Logs/kiln.server.log"
