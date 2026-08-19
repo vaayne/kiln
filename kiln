@@ -135,7 +135,7 @@ run_with_text() {
   [[ -n "$text" ]] || text="$(cat)"
   [[ -n "$text" ]] || die "$kind needs text, as an argument or on stdin"
   local file rc=0
-  file="$(mktemp -t mlx-local)"
+  file="$(mktemp -t kiln)"
   print -rn -- "$text" > "$file"
   api_request "$kind" "$model" "$file" || rc=$?
   rm -f "$file"
