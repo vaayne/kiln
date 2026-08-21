@@ -8,12 +8,20 @@ Kiln 是一个纯 CLI，用 OpenAI-compatible API 调用本地 omlx 后端。Kil
 
 需要 macOS、zsh 和 [uv](https://docs.astral.sh/uv/)。后端由 omlx 或其他 OpenAI-compatible server 独立安装和管理。
 
+直接运行即可，uv 会根据 `pyproject.toml` 安装并缓存 CLI 依赖：
+
 ```bash
-cd ~/workspace/kiln
-./install.sh
+./kiln doctor
+./kiln chat '解释一下什么是 RAG'
 ```
 
-安装脚本会在 `.venv-kiln` 中安装 Kiln 的直接 Python 依赖（当前是 `rich`），再把 `kiln` 链接到 `~/.local/bin/kiln`。它不会修改或启动后端。可用 `KILN_VENV`、`KILN_BIN` 覆盖路径。
+也可以显式运行：
+
+```bash
+uv run --project ~/workspace/kiln ~/workspace/kiln/kiln doctor
+```
+
+不会创建项目 venv、注册 launchd 或启动后端。
 
 ## 环境变量
 
@@ -33,9 +41,7 @@ export KILN_TRANSLATE_MODEL=Hy-MT2-1.8B-4bit
 
 ## 终端体验
 
-CLI 的直接依赖是 `requirements.txt` 中的 `rich`。TTY 中的 Chat、Translate 和 OCR 输出会按 Markdown 渲染，`doctor` 和 `models` 会显示表格；管道和脚本输出保持纯文本/原始 JSON，不污染机器接口。
-
-`./install.sh` 会自动安装它。CLI 也支持 `KILN_PYTHON` 覆盖 Python runtime。用 `KILN_RICH=never` 强制纯文本，或 `KILN_RICH=always` 强制启用终端渲染。
+CLI 的直接依赖是 `pyproject.toml` 中的 `rich`。uv 会自动解析并缓存它。TTY 中的 Chat、Translate 和 OCR 输出会按 Markdown 渲染，`doctor` 和 `models` 会显示表格；管道和脚本输出保持纯文本/原始 JSON，不污染机器接口。用 `KILN_RICH=never` 强制纯文本，或 `KILN_RICH=always` 强制启用终端渲染。
 
 模型 fallback 规则：
 
@@ -125,8 +131,7 @@ CLI 使用的 endpoint：
 | 文件 | 用途 |
 | --- | --- |
 | `kiln` | 纯 OpenAI-compatible CLI |
-| `install.sh` | 安装 CLI 依赖和软链接，不管理后端 |
-| `requirements.txt` | CLI 直接 Python 依赖，目前是 `rich` |
+| `pyproject.toml` | CLI 直接 Python 依赖，目前是 `rich` |
 | `verify.sh` | 针对运行中 API 的 CLI 回归检查 |
 | `bench.py` | OpenAI-compatible API 基准脚本 |
 | `test-data/paddleocr_vl_demo.png` | OCR 回归图片 fixture |

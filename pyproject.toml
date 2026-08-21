@@ -1,0 +1,8 @@
+[project]
+name = "kiln-cli"
+version = "0.1.0"
+description = "OpenAI-compatible CLI for a local AI backend"
+requires-python = ">=3.12"
+dependencies = [
+  "rich>=13.9,<15",
+]

@@ -8,11 +8,9 @@ set -euo pipefail
 die() { print -u2 "error: $*"; exit 1; }
 
 ROOT="${0:A:h}"
-PYTHON="${KILN_PYTHON:-$ROOT/.venv-kiln/bin/python}"
-if [[ ! -x "$PYTHON" ]]; then
-  PYTHON="${KILN_SYSTEM_PYTHON:-$(command -v python3 || true)}"
-fi
-[[ -x "$PYTHON" ]] || die "Python 3 is required; run ./install.sh or set KILN_PYTHON"
+UV="${UV:-$(command -v uv || true)}"
+[[ -n "$UV" ]] || die "uv is required; install it from https://docs.astral.sh/uv/"
+PYTHON_CMD=("$UV" run --project "$ROOT" python)
 
 BASE_URL="${KILN_BASE_URL:-http://127.0.0.1:8007}"
 API_KEY="${KILN_API_KEY:-}"
@@ -73,7 +71,7 @@ write_message() {
 # the message; for ocr, ocr_input is the image path or URL.
 api_request() {
   local kind="$1" model="$2" content_file="$3" ocr_input="${4:-}" instruction="${5:-}"
-  "$PYTHON" - "$kind" "$BASE_URL" "$model" "$API_KEY" "$RETRIES" "$RETRY_SLEEP" "$content_file" "$ocr_input" "$instruction" <<'PY'
+  "${PYTHON_CMD[@]}" - "$kind" "$BASE_URL" "$model" "$API_KEY" "$RETRIES" "$RETRY_SLEEP" "$content_file" "$ocr_input" "$instruction" <<'PY'
 import base64, json, mimetypes, os, re, sys, time, pathlib, urllib.error, urllib.request
 
 kind, base, model, key, retries, delay, content_file, ocr_input, instruction = sys.argv[1:10]
@@ -217,7 +215,7 @@ cmd_ocr() {
 }
 
 cmd_models() {
-  "$PYTHON" - "$BASE_URL" "$API_KEY" <<'PY'
+  "${PYTHON_CMD[@]}" - "$BASE_URL" "$API_KEY" <<'PY'
 import json, os, sys, urllib.error, urllib.request
 base, key = sys.argv[1], sys.argv[2]
 request = urllib.request.Request(base.rstrip("/") + "/v1/models", headers={"Authorization": "Bearer " + key})
@@ -248,7 +246,7 @@ PY
 }
 
 cmd_doctor() {
-  "$PYTHON" - "$BASE_URL" "$API_KEY" <<'PY'
+  "${PYTHON_CMD[@]}" - "$BASE_URL" "$API_KEY" <<'PY'
 import json, os, sys, urllib.error, urllib.request
 base, key = sys.argv[1], sys.argv[2]
 request = urllib.request.Request(base.rstrip("/") + "/health", headers={"Authorization": "Bearer " + key})

@@ -10,7 +10,7 @@ Kiln 是纯 OpenAI-compatible CLI。后端由 omlx 或其他兼容服务独立�
 - Translate：同一 chat endpoint，模型来自 `KILN_TRANSLATE_MODEL`，未设置时 fallback 到 `KILN_MODEL`
 - Embedding：`/v1/embeddings`，必须设置 `KILN_EMBEDDING_MODEL`
 
-配置只来自环境变量，不再使用 `config.sh`、TOML、launchd 或 PaddleOCR。CLI 自己的 Python 依赖由 `requirements.txt` 和 `.venv-kiln` 管理。
+配置只来自环境变量，不再使用 `config.sh`、TOML、launchd 或 PaddleOCR。CLI 自己的 Python 依赖由 `pyproject.toml` 和 uv 管理。
 
 ## 不要做
 

@@ -23,7 +23,7 @@ export KILN_TRANSLATE_MODEL=Hy-MT2-1.8B-4bit
 
 OCR and translation fall back to `KILN_MODEL` when their specific model variable is unset. Embeddings have no fallback and fail clearly when `KILN_EMBEDDING_MODEL` is unset.
 
-`rich` is a direct CLI dependency installed by `./install.sh` into `.venv-kiln`. TTY output gets Markdown and table rendering; pipes stay machine-readable. Use `KILN_RICH=never` to force plain output or `KILN_RICH=always` to force rich rendering. `KILN_PYTHON` can override the managed Python runtime.
+`rich` is a direct CLI dependency declared in `pyproject.toml`; uv resolves and caches it on first run. TTY output gets Markdown and table rendering; pipes stay machine-readable. Use `KILN_RICH=never` to force plain output or `KILN_RICH=always` to force rich rendering.
 
 ## Safe start
 

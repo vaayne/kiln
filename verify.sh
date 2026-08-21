@@ -21,9 +21,7 @@ check() {
 }
 
 print "syntax"
-for f in "$ROOT"/kiln "$ROOT"/install.sh; do
-  check "${f:t}" zsh -n "$f"
-done
+check "kiln" zsh -n "$CLI"
 
 print "\ndoctor"
 check "doctor reaches the backend" "$CLI" doctor
