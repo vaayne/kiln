@@ -1,127 +1,126 @@
-# Kiln
+# Kiln CLI
 
-一个面向 Apple Silicon 的本地 AI 能力包：Chat、Embedding 和 PaddleOCR-VL 文档解析，由 launchd 管理的纯 CLI 本地 AI 能力包。
+Kiln 是一个纯 CLI，用 OpenAI-compatible API 调用本地 omlx 后端。Kiln 不启动、重启或配置后端，也不依赖 `config.sh`、launchd 或 PaddleOCR。
+
+默认后端地址：`http://127.0.0.1:8007`。
 
 ## 安装
 
-需要 macOS、Apple Silicon、[uv](https://docs.astral.sh/uv/) 和网络访问 Hugging Face。
+需要 macOS 和 zsh。后端由 omlx 或其他 OpenAI-compatible server 独立安装和管理。
 
 ```bash
 cd ~/workspace/kiln
 ./install.sh
 ```
 
-安装脚本会：
+安装脚本只会把 `kiln` 链接到 `~/.local/bin/kiln`，不会修改或启动后端。
 
-1. 用 `uv tool install` 安装 MLX-VLM、FastAPI 网关和 chat template 依赖。
-2. 创建独立的 Python 3.12 PaddleOCR 环境，避免和 MLX 的 Python 3.14 环境冲突。
-3. 安装 PaddlePaddle CPU runtime 和 `paddleocr[doc-parser]`。
-4. 安装并启动 Kiln 网关及其唯一的 MLX worker。
+## 环境变量
 
-首次使用会从 Hugging Face 下载模型。
+所有配置都通过环境变量完成，环境变量优先于 CLI 内置默认值：
 
-## 常用命令
+```zsh
+export KILN_BASE_URL=http://127.0.0.1:8007
+export KILN_API_KEY=local
 
-```bash
-./kiln doctor
-./kiln config show
-./kiln config set runtime.enable_thinking false
-./kiln chat '解释一下什么是 RAG'
-./kiln embed '这段文字用于向量检索'
-./kiln ocr ./invoice.pdf
-./kiln logs -f
-./kiln unload
-./kiln service restart
+export KILN_MODEL=ornith-ai--Ornith-1.5-35B-A3B-MLX-4bit
+export KILN_OCR_MODEL=Unlimited-OCR-mxfp8
+export KILN_EMBEDDING_MODEL=mlx-community--Qwen3-Embedding-4B-4bit-DWQ
+export KILN_TRANSLATE_MODEL=Hy-MT2-1.8B-4bit
 ```
 
-`doctor` 会列出服务当前实际加载了哪些模型，是判断内存占用的第一手依据。`ocr` 默认输出到当前目录的 `./ocr-output`，可用 `--output` 指定。
+本地后端只要检查 Authorization header，`KILN_API_KEY` 可以是任意非空值。也可以不设置它，CLI 会使用 `local`；如果设置了 `KILN_API_KEY_FILE`，CLI 会从该文件读取 key。
 
-## CLI 配置
+模型 fallback 规则：
 
-`kiln config show` 打印经过校验、且不包含密钥的 TOML 配置。`kiln config set SECTION.KEY VALUE` 只允许修改 `models.*` 和 `runtime.*`，原子写入 `~/.config/kiln/config.toml` 后立即重启 Kiln，让 worker 确实使用新值。布尔值和数字使用 JSON 写法，例如 `false`、`8`；模型 ID 直接传字符串。
-
-```bash
-kiln config set models.agent mlx-community/Qwen3.8-27B-4bit
-kiln config set runtime.max_kv_size 32768
-kiln config set runtime.enable_thinking false
-```
-
-服务重启会让请求短暂失败约 10~15 秒。`server.*` 固定为本地单端口布局，不可经此命令修改。
-
-## 服务布局
-
-| 能力 | 地址 | 后端 |
+| 能力 | 环境变量 | 未设置时 |
 | --- | --- | --- |
-| API gateway | `127.0.0.1:8007/v1/*` | FastAPI，唯一公开端口 |
-| Agent / Chat | `127.0.0.1:8007/v1/chat/completions` | Qwen3.8-27B + MTP |
-| Embedding | `127.0.0.1:8007/v1/embeddings` | Qwen3-Embedding-4B，按需加载 |
-| OCR VLM | `127.0.0.1:8007/v1/chat/completions` | PaddleOCR-VL-1.6，按需加载 |
+| Chat | `KILN_MODEL` | 使用 CLI 默认模型 |
+| OCR | `KILN_OCR_MODEL` | fallback 到 `KILN_MODEL` |
+| Translate | `KILN_TRANSLATE_MODEL` | fallback 到 `KILN_MODEL` |
+| Embedding | `KILN_EMBEDDING_MODEL` | 不可用，直接报错 |
 
-OCR 不是直接请求 VLM。完整流程由 PaddleOCR 在 CPU 上负责版面检测、阅读顺序和结果输出，MLX-VLM 只作为 VLM 识别后端。这是 PaddleOCR 官方 Apple Silicon 推荐的集成方式。
-
-## HTTP endpoints
-
-公开 API 都在 `127.0.0.1:8007`，需要 `api-key`：
+## 命令
 
 ```bash
-curl -H "Authorization: Bearer $(< api-key)" http://127.0.0.1:8007/health
-curl -H "Authorization: Bearer $(< api-key)" http://127.0.0.1:8007/v1/models
+kiln doctor
+kiln models
+kiln chat '解释一下什么是 RAG'
+printf '%s\n' '总结这段文本' | kiln chat
+kiln translate --lang 中文 'Hello, world.'
+kiln embed '这段文字用于向量检索'
+kiln ocr ./invoice.png
+
+OCR 也可以接收自定义指令或 HTTP(S) 图片 URL：
+
+```bash
+kiln ocr '只输出图片中的文字' ./invoice.png
+kiln ocr https://example.com/image.png
 ```
 
-主要接口：
+### Chat
 
-| Endpoint | 用途 |
+`kiln chat` 使用 `/v1/chat/completions` 和 `KILN_MODEL`，不带参数时从 stdin 读取。长文本通过 stdin 传入，不受 shell 参数长度限制。
+
+### Translate
+
+`kiln translate` 使用 `/v1/chat/completions` 和 `KILN_TRANSLATE_MODEL`。默认目标语言是英文，可用 `--lang` 或 `-l` 指定目标语言：
+
+```bash
+kiln translate '今天天气不错。'
+kiln translate --lang 中文 'The weather is nice today.'
+```
+
+CLI 会附加“只输出译文”的提示，避免翻译模型退化成普通聊天。也可以用 `KILN_TRANSLATE_INSTRUCTION` 完全覆盖默认提示。
+
+### Embedding
+
+`kiln embed` 使用 `/v1/embeddings`。必须设置 `KILN_EMBEDDING_MODEL`，输出原始 OpenAI-compatible JSON，适合继续被脚本解析。
+
+### OCR
+
+`kiln ocr` 使用 `/v1/chat/completions`，把本地图片编码成 data URL，或直接传递 HTTP(S) 图片 URL。默认附加 OCR 指令：`请识别图片中的全部文字并原样输出`。可用 `KILN_OCR_INSTRUCTION` 覆盖，也可以把自定义指令作为第一个参数传入。
+
+当前 OCR 接受图片，不直接接受 PDF、DOCX 等文档容器。它打印 OCR 模型返回的文本，不再生成 Markdown、JSON、DOCX 或 layout PNG。
+
+### Doctor 和 Models
+
+```bash
+kiln doctor
+kiln models
+```
+
+`doctor` 请求 `/health` 并打印后端返回的 JSON；`models` 请求 `/v1/models`，每行打印一个模型 id。
+
+### 日志
+
+日志不是 Kiln 管理的。若后端写入了本地日志，可以显式设置 `KILN_LOG` 后使用：
+
+```bash
+KILN_LOG=/path/to/backend.log kiln logs -f
+```
+
+## API
+
+CLI 使用的 endpoint：
+
+| 命令 | Endpoint |
 | --- | --- |
-| `/v1/chat/completions` | Agent、文本/图片对话，也可直接指定 PaddleOCR-VL 模型 |
-| `/v1/embeddings` | OpenAI-compatible 文本向量，指定 Qwen3 Embedding 模型 |
-| `/health` | 服务状态和当前加载的模型 |
-| `/v1/models` | 可用模型列表 |
-| `/unload` | 释放当前模型缓存，给下一类能力让内存 |
+| `chat` / `translate` / `ocr` | `/v1/chat/completions` |
+| `embed` | `/v1/embeddings` |
+| `models` | `/v1/models` |
+| `doctor` | `/health` |
 
-直接调用 Embedding：
+模型切换期间后端可能暂时拒绝连接。CLI 默认重试 12 次，每次间隔 3 秒，可用 `KILN_RETRIES` 和 `KILN_RETRY_DELAY` 调整。
 
-```bash
-curl -X POST http://127.0.0.1:8007/v1/embeddings \
-  -H "Authorization: Bearer $(< api-key)" \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"mlx-community/Qwen3-Embedding-4B-4bit-DWQ","input":["hello","你好"]}'
-```
-
-Agent 客户端可直接使用 OpenAI-compatible 配置：
-
-```text
-base_url = http://127.0.0.1:8007/v1
-api_key  = <~/.config/kiln/api-key 的内容>
-model    = mlx-community/Qwen3.8-27B-4bit
-```
-
-## 文件说明
+## 文件
 
 | 文件 | 用途 |
 | --- | --- |
-| `~/.config/kiln/config.toml` | 模型与运行参数的唯一来源，由 `kiln config` 校验并原子写入 |
-| `config.sh` | 将 `~/.config/kiln/config.toml` 统一导出给 shell 消费者；只放路径和密钥文件位置 |
-| `kiln_server.py` | `:8007` API gateway 和私有 MLX worker supervisor |
-| `kiln` | 统一命令入口 |
-| `verify.sh` | 回归验收，改动后跑它 |
-| `install.sh` | 安装依赖并注册 launchd |
-| `launchd/*.plist.in` | launchd 模板，安装时展开到 `~/Library/LaunchAgents` |
-| `AGENTS.md` | 改动这套东西时的约定和陷阱 |
+| `kiln` | 纯 OpenAI-compatible CLI |
+| `install.sh` | 安装 CLI 软链接，不管理后端 |
+| `verify.sh` | 针对运行中 API 的 CLI 回归检查 |
+| `bench.py` | OpenAI-compatible API 基准脚本 |
+| `kiln_server.py` / `kiln_config.py` | 旧版后端实现，CLI 不再调用 |
 
-## 内存与延迟
-
-这是一个 HTTP server，不是三个常驻服务，平时只有 Agent 模型占内存。代价是同一时刻只保留一个生成模型：交替使用 chat 和 OCR 时，每次切换都要重建 worker，大约 10~15 秒。`kiln` 会自动等待重试，用别的客户端直连 API 则需要自己重试。
-
-内存压力变高时，先释放按需加载的模型，退回到只保留 Agent：
-
-```bash
-./kiln unload
-```
-
-要完全让出内存，停掉服务：
-
-```bash
-./kiln service stop
-```
-
-`api-key` 存放在 `~/.config/kiln/api-key`，不进入仓库，也不要写入日志或文档。改动这套配置前先读 `AGENTS.md`。
+API key、模型缓存和 OCR 输出不要提交到仓库。

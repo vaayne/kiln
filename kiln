@@ -1,174 +1,233 @@
 #!/bin/zsh
 set -euo pipefail
 
-ROOT="${0:A:h}"
-source "$ROOT/config.sh"
+# Pure OpenAI-API client. No backend management: the server at KILN_BASE_URL is a
+# separate process. Routing is by environment variable; defaults match the local
+# omlx setup and can be overridden in the shell.
 
 die() { print -u2 "error: $*"; exit 1; }
 
-# Switching the loaded model restarts the generation worker for ~15s, during
-# which requests are refused; every command rides that out instead of failing.
-RETRIES=12
-RETRY_SLEEP=3
+BASE_URL="${KILN_BASE_URL:-http://127.0.0.1:8007}"
+API_KEY="${KILN_API_KEY:-}"
+if [[ -z "$API_KEY" && -n "${KILN_API_KEY_FILE:-}" && -f "${KILN_API_KEY_FILE:-}" ]]; then
+  API_KEY="$(cat "$KILN_API_KEY_FILE")"
+fi
+[ -n "$API_KEY" ] || API_KEY="local"   # local-only: any value works.
+
+# Model routing. Env vars win. ocr and translate fall back to KILN_MODEL per spec;
+# embedding has no fallback and fails if KILN_EMBEDDING_MODEL is unset.
+MODEL="${KILN_MODEL:-ornith-ai--Ornith-1.5-35B-A3B-MLX-4bit}"
+OCR_MODEL="${KILN_OCR_MODEL:-$MODEL}"
+EMBED_MODEL="${KILN_EMBEDDING_MODEL:-}"
+TRANSLATE_MODEL="${KILN_TRANSLATE_MODEL:-$MODEL}"
+
+# Backend reloads a model on switch, refusing connections for ~10-15s. Ride that
+# out instead of failing. Override with KILN_RETRIES / KILN_RETRY_DELAY.
+RETRIES="${KILN_RETRIES:-12}"
+RETRY_SLEEP="${KILN_RETRY_DELAY:-3}"
 
 usage() {
   cat <<EOF
-kiln, local AI capability hub on $KILN_URL
+kiln, a pure OpenAI-API client for the local server at ${BASE_URL}
+
+Routing is by environment. Override any of these in your shell:
+  KILN_BASE_URL  KILN_API_KEY  KILN_MODEL  KILN_OCR_MODEL  KILN_EMBEDDING_MODEL  KILN_TRANSLATE_MODEL
 
 Usage:
-  kiln chat "message"           agent reply (reads stdin when no argument)
-  kiln embed "text"             embedding JSON (reads stdin when no argument)
-  kiln ocr FILE [--output DIR]  document parse to md, json, docx, layout png
-  kiln config show              print validated, secret-free settings
-  kiln config set KEY VALUE     validate, save, and restart after a setting change
-  kiln doctor                   binaries, server health, loaded models
-  kiln logs [-f] [-n LINES]     server log
-  kiln unload                   drop on-demand models, back to agent only
-  kiln service {start|stop|restart|status}
-  kiln install
-  kiln serve                    run gateway and MLX worker in the foreground
+  kiln chat "message"        agent reply (reads stdin when no argument)
+  kiln translate [--lang LANG] "text"  translation (uses KILN_TRANSLATE_MODEL)
+  kiln embed "text"                    embedding JSON (needs KILN_EMBEDDING_MODEL)
+  kiln ocr [INSTRUCTION] PATH|URL       OCR a local image or image URL (KILN_OCR_MODEL)
+  kiln models                list backend models
+  kiln doctor                server health and loaded models
+  kiln logs [-f] [-n LINES]  tail the server log (needs KILN_LOG)
+  kiln help
 
-The agent model is preloaded; embedding and OCR models load on first use. Only
-one generation model stays resident, so alternating chat and OCR pays a reload.
+ocr accepts a local image file or an http(s) URL and prints the model's output.
+It does not run PaddleOCR; the OCR model performs recognition over the API.
 EOF
 }
 
-# launchd's entry point. The gateway owns the public port and supervises the
-# MLX worker on KILN_UPSTREAM_PORT, so the OpenAI-compatible API stays behind
-# one external address.
-cmd_serve() {
-  export PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-  exec "$KILN_PYTHON" "$KILN_ROOT/kiln_server.py"
+# Write the message (argument, or stdin) to a temp file and echo its path. The
+# file is read inside python so the heredoc stays python's stdin and large input
+# never hits ARG_MAX. Returns the path; caller removes it.
+write_message() {
+  local file
+  file="$(mktemp -t kiln-msg)"
+  if (( $# > 0 )); then
+    print -rn -- "$@" > "$file"
+  else
+    cat > "$file"
+  fi
+  printf '%s' "$file"
 }
 
-api_curl() {
-  curl -fsS -m 10 -H "Authorization: Bearer $(< "$KILN_API_KEY_FILE")" "$@"
-}
-
-service_action() {
-  local domain="gui/$(id -u)" action="$1"
-  case "$action" in
-    start|restart)
-      launchctl print "$domain/$KILN_LABEL" >/dev/null 2>&1 || \
-        launchctl bootstrap "$domain" "$HOME/Library/LaunchAgents/$KILN_LABEL.plist"
-      if [[ "$action" == restart ]]; then
-        launchctl kickstart -k "$domain/$KILN_LABEL"
-      else
-        launchctl kickstart "$domain/$KILN_LABEL"
-      fi
-      ;;
-    stop) launchctl bootout "$domain/$KILN_LABEL" 2>/dev/null || true ;;
-    status) launchctl print "$domain/$KILN_LABEL" | sed -n '1,12p' ;;
-    *) die "unknown service action: $action" ;;
-  esac
-}
-
-# Body is built in python so arbitrarily large stdin never hits ARG_MAX.
+# kind: chat | translate | embed | ocr. For text commands, content_file holds
+# the message; for ocr, ocr_input is the image path or URL.
 api_request() {
-  local kind="$1" model="$2" text_file="$3"
-  python3 - "$kind" "$KILN_URL" "$model" "$text_file" "$KILN_API_KEY_FILE" "$RETRIES" "$RETRY_SLEEP" <<'PY'
-import json, sys, time, urllib.error, urllib.request
+  local kind="$1" model="$2" content_file="$3" ocr_input="${4:-}" instruction="${5:-}"
+  python3 - "$kind" "$BASE_URL" "$model" "$API_KEY" "$RETRIES" "$RETRY_SLEEP" "$content_file" "$ocr_input" "$instruction" <<'PY'
+import base64, json, mimetypes, re, sys, time, pathlib, urllib.error, urllib.request
 
-kind, base, model, text_path, key_path, retries, delay = sys.argv[1:]
-retries, delay = int(retries), float(delay)
-text = open(text_path, encoding="utf-8").read()
+kind, base, model, key, retries, delay, content_file, ocr_input, instruction = sys.argv[1:10]
+retries, delay = max(1, int(retries)), float(delay)
 
-if kind == "chat":
-    path = "/v1/chat/completions"
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": text}],
-        "temperature": 0,
-        "stream": False,
-    }
+def show_error(code, body=""):
+    sys.stderr.write("request failed (%s): %s\n" % (code, (body or "").strip() or code))
+    sys.exit(3)
+
+if kind == "ocr":
+    path = ocr_input
+    if re.match(r"^https?://", path):
+        image_obj = {"type": "image_url", "image_url": {"url": path}}
+    else:
+        ext = pathlib.Path(path).suffix.lower()
+        if ext in (".pdf", ".txt", ".html", ".docx", ".doc", ".xlsx", ".pptx"):
+            sys.stderr.write("ocr: cannot pass a %s directly; convert to an image first\n" % ext)
+            sys.exit(3)
+        raw = pathlib.Path(path).read_bytes()
+        mime = mimetypes.guess_type(path)[0] or "image/png"
+        b64 = base64.b64encode(raw).decode("ascii")
+        image_obj = {"type": "image_url", "image_url": {"url": "data:%s;base64,%s" % (mime, b64)}}
+    endpoint = "/v1/chat/completions"
+    content = [image_obj]
+    if (instruction or "").strip():
+        content.append({"type": "text", "text": instruction})
+    payload = {"model": model, "messages": [{"role": "user", "content": content}]}
 else:
-    path = "/v1/embeddings"
-    payload = {"model": model, "input": text}
+    text = pathlib.Path(content_file).read_text(encoding="utf-8")
+    if not text.strip():
+        sys.stderr.write("needs a message, as an argument or on stdin\n")
+        sys.exit(3)
+    if kind == "embed":
+        endpoint = "/v1/embeddings"
+        payload = {"model": model, "input": text}
+    elif kind == "translate":
+        endpoint = "/v1/chat/completions"
+        content = text
+        if (instruction or "").strip():
+            content = instruction + "\n\n" + text
+        payload = {"model": model, "messages": [{"role": "user", "content": content}], "temperature": 0, "stream": False}
+    else:
+        endpoint = "/v1/chat/completions"
+        payload = {"model": model, "messages": [{"role": "user", "content": text}], "temperature": 0, "stream": False}
 
 request = urllib.request.Request(
-    base + path,
+    base.rstrip("/") + endpoint,
     data=json.dumps(payload).encode(),
-    headers={
-        "Authorization": "Bearer " + open(key_path).read().strip(),
-        "Content-Type": "application/json",
-    },
+    headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
 )
 
+final_body = ""
 for attempt in range(retries):
     final = attempt == retries - 1
     try:
         with urllib.request.urlopen(request, timeout=600) as response:
-            body = response.read().decode()
+            final_body = response.read().decode()
         break
     except urllib.error.HTTPError as exc:
-        if exc.code not in (500, 502, 503, 504) or final:
-            raise
-    except OSError:
+        final_body = exc.read().decode(errors="replace")
+        if exc.code in (500, 502, 503, 504) and not final:
+            continue
+        show_error(exc.code, final_body)
+    except OSError as exc:
         if final:
-            raise
+            sys.stderr.write("connection failed to %s: %s\n" % (base, exc))
+            sys.exit(3)
     time.sleep(delay)
 
-if kind == "chat":
-    print(json.loads(body)["choices"][0]["message"].get("content", ""))
+if kind == "embed":
+    sys.stdout.write(final_body)
 else:
-    print(body)
+    try:
+        print(json.loads(final_body)["choices"][0]["message"].get("content", ""))
+    except Exception:
+        sys.stderr.write(final_body)
+        sys.exit(4)
 PY
 }
 
-run_with_text() {
-  local kind="$1" model="$2"
-  shift 2
-  local text="${*:-}"
-  [[ -n "$text" ]] || text="$(cat)"
-  [[ -n "$text" ]] || die "$kind needs text, as an argument or on stdin"
+cmd_chat() {
   local file rc=0
-  file="$(mktemp -t kiln)"
-  print -rn -- "$text" > "$file"
-  api_request "$kind" "$model" "$file" || rc=$?
+  file="$(write_message "$@")"
+  api_request chat "$MODEL" "$file" || rc=$?
+  rm -f "$file"
+  return $rc
+}
+
+cmd_translate() {
+  local target="英文" instruction="${KILN_TRANSLATE_INSTRUCTION:-}"
+  if [[ "${1:-}" == --lang || "${1:-}" == -l ]]; then
+    [[ -n "${2:-}" ]] || die "${1} needs a target language"
+    target="$2"
+    shift 2
+  fi
+  [[ -n "$instruction" ]] || instruction="将以下文字翻译成${target}，只输出译文。"
+  local file rc=0
+  file="$(write_message "$@")"
+  api_request translate "$TRANSLATE_MODEL" "$file" "" "$instruction" || rc=$?
+  rm -f "$file"
+  return $rc
+}
+
+cmd_embed() {
+  [[ -n "$EMBED_MODEL" ]] || die "kiln embed needs KILN_EMBEDDING_MODEL set"
+  local file rc=0
+  file="$(write_message "$@")"
+  api_request embed "$EMBED_MODEL" "$file" || rc=$?
   rm -f "$file"
   return $rc
 }
 
 cmd_ocr() {
-  [[ -x "$KILN_PADDLEOCR_BIN" ]] || die "PaddleOCR is not installed; run: kiln install"
-  local input="${1:-}" output="$PWD/ocr-output"
-  [[ -n "$input" ]] || die "ocr needs an image or PDF path"
-  shift
-  if [[ "$input" != http://* && "$input" != https://* && ! -f "$input" ]]; then
-    die "OCR input not found: $input (cwd: $PWD; use an absolute path if needed)"
-  fi
-  while (( $# )); do
-    case "$1" in
-      --output) output="${2:?--output needs a directory}"; shift 2 ;;
-      *) die "unknown ocr option: $1" ;;
-    esac
-  done
-  mkdir -p "$output"
-  local log attempt
-  log="$(mktemp -t kiln-ocr)"
-  for attempt in {1..$RETRIES}; do
-    if "$KILN_PADDLEOCR_BIN" doc_parser \
-      --input "$input" \
-      --pipeline_version v1.6 \
-      --device cpu \
-      --save_path "$output" \
-      --vl_rec_backend mlx-vlm-server \
-      --vl_rec_server_url "$KILN_URL/" \
-      --vl_rec_api_model_name "$KILN_OCR_VLM_MODEL" \
-      --vl_rec_api_key "$(< "$KILN_API_KEY_FILE")" \
-      --vl_rec_max_concurrency 1 >"$log" 2>&1; then
-      rm -f "$log"
-      print "OCR complete: $output"
-      return 0
+  local instruction="${KILN_OCR_INSTRUCTION:-请识别图片中的全部文字并原样输出}"
+  local image="" has_image=0 a first_nonpath=""
+  # First path/http arg is the image; one preceding non-path arg is the instruction.
+  for a in "$@"; do
+    if [[ "$a" == http://* || "$a" == https://* || -f "$a" ]]; then
+      image="$a"; has_image=1
+    elif [[ -z "$first_nonpath" ]]; then
+      first_nonpath="$a"
     fi
-    if ! grep -Eqi 'connection error|connection refused|remote disconnected|temporarily unavailable' "$log" \
-      || (( attempt == RETRIES )); then
-      cat "$log" >&2
-      rm -f "$log"
-      return 1
-    fi
-    sleep "$RETRY_SLEEP"
   done
+  (( has_image )) || die "usage: kiln ocr [INSTRUCTION] PATH|URL"
+  [[ -n "$first_nonpath" ]] && instruction="${first_nonpath}"
+  api_request ocr "$OCR_MODEL" "" "$image" "$instruction"
+}
+
+cmd_models() {
+  python3 - "$BASE_URL" "$API_KEY" <<'PY'
+import json, sys, urllib.error, urllib.request
+base, key = sys.argv[1], sys.argv[2]
+request = urllib.request.Request(base.rstrip("/") + "/v1/models", headers={"Authorization": "Bearer " + key})
+try:
+    with urllib.request.urlopen(request, timeout=10) as response:
+        data = json.loads(response.read())
+except urllib.error.HTTPError as exc:
+    sys.stderr.write("request failed (%s): %s\n" % (exc.code, exc.read().decode(errors="replace").strip()))
+    sys.exit(3)
+except OSError as exc:
+    sys.stderr.write("connection failed to %s: %s\n" % (base, exc)); sys.exit(3)
+for item in data.get("data", []):
+    print(item.get("id"))
+PY
+}
+
+cmd_doctor() {
+  python3 - "$BASE_URL" "$API_KEY" <<'PY'
+import json, sys, urllib.error, urllib.request
+base, key = sys.argv[1], sys.argv[2]
+request = urllib.request.Request(base.rstrip("/") + "/health", headers={"Authorization": "Bearer " + key})
+try:
+    with urllib.request.urlopen(request, timeout=10) as response:
+        health = json.loads(response.read())
+except urllib.error.HTTPError as exc:
+    sys.stderr.write("server at %s returned %s\n" % (base, exc.code))
+    sys.exit(3)
+except OSError as exc:
+    sys.stderr.write("connection failed to %s: %s\n" % (base, exc)); sys.exit(3)
+sys.stdout.write(json.dumps(health, ensure_ascii=False) + "\n")
+PY
 }
 
 cmd_logs() {
@@ -180,80 +239,19 @@ cmd_logs() {
       *) die "unknown logs option: $1" ;;
     esac
   done
-  [[ -f "$KILN_LOG" ]] || die "no log yet: $KILN_LOG"
-  tail $follow -n "$lines" "$KILN_LOG"
-}
-
-cmd_unload() {
-  # The server tears its worker down mid-response, so an empty reply is expected.
-  api_curl -X POST "$KILN_URL/unload" >/dev/null 2>&1 || true
-  local attempt
-  for attempt in {1..$RETRIES}; do
-    if api_curl "$KILN_URL/health" >/dev/null 2>&1; then
-      cmd_doctor
-      return 0
-    fi
-    sleep "$RETRY_SLEEP"
-  done
-  die "server did not come back after unload"
-}
-
-cmd_config() {
-  case "${1:-show}" in
-    show)
-      (( $# <= 1 )) || die "usage: kiln config show"
-      "$KILN_PYTHON" "$KILN_ROOT/kiln_config.py" show "$KILN_CONFIG_FILE"
-      ;;
-    set)
-      (( $# == 3 )) || die "usage: kiln config set SECTION.KEY VALUE"
-      "$KILN_PYTHON" "$KILN_ROOT/kiln_config.py" set "$KILN_CONFIG_FILE" "$2" "$3" || die "could not save configuration"
-      print "Saved $2. Restarting Kiln so the worker uses the new setting..."
-      service_action restart
-      ;;
-    *) die "usage: kiln config {show|set}" ;;
-  esac
-}
-
-cmd_doctor() {
-  local rc=0 health name bin
-  for name bin in "server binary" "$MLX_SERVER_BIN" paddleocr "$KILN_PADDLEOCR_BIN"; do
-    if [[ -x "$bin" ]]; then
-      printf 'ok       %-14s %s\n' "$name" "$bin"
-    else
-      printf 'MISSING  %-14s %s\n' "$name" "$bin"
-      rc=1
-    fi
-  done
-  if health="$(api_curl "$KILN_URL/health" 2>/dev/null)"; then
-    printf 'ok       %-14s %s\n' server "$KILN_URL"
-    python3 - "$health" <<'PY'
-import json, sys
-health = json.loads(sys.argv[1])
-loaded = health.get("loaded_models") or {}
-for kind, info in loaded.items():
-    print("         %-14s %s: %s" % ("loaded", kind, info.get("model")))
-if not loaded:
-    print("         %-14s none" % "loaded")
-print("         %-14s %s" % ("context", health.get("effective_context_limit")))
-PY
-  else
-    printf 'DOWN     %-14s %s\n' server "$KILN_URL"
-    rc=1
-  fi
-  return $rc
+  local log="${KILN_LOG:-}"
+  [[ -n "$log" && -f "$log" ]] || die "no KILN_LOG configured or log not found"
+  tail $follow -n "$lines" "$log"
 }
 
 case "${1:-help}" in
-  install) exec "$ROOT/install.sh" ;;
-  serve) cmd_serve ;;
-  config) shift; cmd_config "$@" ;;
-  doctor) cmd_doctor ;;
-  service) shift; service_action "${1:-status}" ;;
-  chat) shift; run_with_text chat "$KILN_AGENT_MODEL" "$@" ;;
-  embed) shift; run_with_text embed "$KILN_EMBED_MODEL" "$@" ;;
-  ocr) shift; cmd_ocr "$@" ;;
-  logs) shift; cmd_logs "$@" ;;
-  unload) cmd_unload ;;
+  chat)      shift; cmd_chat "$@" ;;
+  translate) shift; cmd_translate "$@" ;;
+  embed)     shift; cmd_embed "$@" ;;
+  ocr)       shift; cmd_ocr "$@" ;;
+  models)    shift; cmd_models "$@" ;;
+  doctor)    shift; cmd_doctor "$@" ;;
+  logs)      shift; cmd_logs "$@" ;;
   help|-h|--help) usage ;;
-  *) usage; exit 2 ;;
+  *)         usage; exit 2 ;;
 esac

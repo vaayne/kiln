@@ -1,84 +1,104 @@
 ---
 name: kiln-cli
-description: Operate Kiln, a local Apple Silicon AI service, exclusively through its `kiln` command-line interface. Use this skill whenever the user asks to chat with Kiln, generate embeddings, OCR a PDF or image, inspect or change Kiln models/runtime settings, diagnose its local AI service, unload models, read Kiln logs, or control the Kiln launchd service. Prefer it even when the user only says “use my local model”, “run local OCR”, or “change the Qwen settings”.
-compatibility: Requires macOS with the `kiln` executable installed and its local launchd service available.
+description: Use Kiln as a pure OpenAI-compatible CLI for local chat, translation, embeddings, OCR, model listing, and backend health checks. Trigger whenever the user asks to use a local model, translate text, generate embeddings, OCR an image, inspect available models, or diagnose the local API.
+compatibility: Requires the `kiln` executable and an OpenAI-compatible backend reachable through `KILN_BASE_URL`.
 ---
 
 # Kiln CLI
 
-Use Kiln as a local capability service, not a browser application. Keep the API key in `~/.config/kiln/api-key`; never print, copy, pass it in a shell command, or put it in an artifact.
+Kiln is only an API client. It does not start, stop, restart, unload, configure, or supervise the backend. Do not use launchd commands, `kiln service`, `kiln serve`, `kiln unload`, or `kiln config`; those are no longer CLI commands.
 
-## Start safely
+Keep the API key private. Never print it, copy it into an artifact, or put it in a shell command shown to the user. The local default key is `local`; use `KILN_API_KEY` or `KILN_API_KEY_FILE` when the backend expects another value.
 
-1. Resolve the executable with `command -v kiln`. If it is absent, say so and ask before running the repository's installer.
-2. Run `kiln doctor` before an operation that depends on the service. If the service is down, report that and use `kiln service start` only when the user asked to operate Kiln or authorized recovery.
-3. Report the command outcome, model-switch cost when relevant, and output path for files. Do not narrate secrets or dump embedding vectors unless the user requested them.
+## Environment
 
-`kiln` already retries transient worker restarts for 12 attempts, 3 seconds apart. Do not add a competing retry loop.
+```zsh
+export KILN_BASE_URL=http://127.0.0.1:8007
+export KILN_API_KEY=local
+export KILN_MODEL=ornith-ai--Ornith-1.5-35B-A3B-MLX-4bit
+export KILN_OCR_MODEL=Unlimited-OCR-mxfp8
+export KILN_EMBEDDING_MODEL=mlx-community--Qwen3-Embedding-4B-4bit-DWQ
+export KILN_TRANSLATE_MODEL=Hy-MT2-1.8B-4bit
+```
+
+OCR and translation fall back to `KILN_MODEL` when their specific model variable is unset. Embeddings have no fallback and fail clearly when `KILN_EMBEDDING_MODEL` is unset.
+
+## Safe start
+
+Run `kiln doctor` before an operation that depends on the backend when availability is uncertain. If it is down, report the endpoint and ask the user to repair or start the backend externally. Do not run backend recovery commands on Kiln's behalf.
+
+The CLI retries transient 5xx and connection failures for 12 attempts, 3 seconds apart by default. Do not add a competing retry loop. Override with `KILN_RETRIES` and `KILN_RETRY_DELAY` only when needed.
 
 ## Commands
 
 ### Chat
 
-Use `kiln chat 'prompt'` for a short prompt. For multiline or long content, pipe standard input so shell quoting and argument-size limits cannot corrupt it:
-
 ```zsh
-cat <<'PROMPT' | kiln chat
-Summarize this document in five Chinese bullets:
-...
-PROMPT
+kiln chat '解释一下什么是 RAG'
+cat document.txt | kiln chat
 ```
 
-The command is single-turn. Preserve conversation context in the prompt only when the user supplied it. It prints plain assistant text.
+It sends one user message to `/v1/chat/completions` using `KILN_MODEL` and prints plain assistant text. stdin is preferred for long or multiline input.
+
+### Translation
+
+```zsh
+kiln translate '今天天气不错。'
+kiln translate --lang 中文 'The weather is nice today.'
+```
+
+The default target is English; `--lang` or `-l` selects another target language. The CLI adds a translation-only instruction because Hy-MT2 otherwise may behave like a general chat model. Override it with `KILN_TRANSLATE_INSTRUCTION`.
 
 ### Embeddings
 
-Use `kiln embed 'text'` or standard input. It prints OpenAI-compatible JSON. For normal work, report vector count and dimension rather than pasting thousands of floats. Save raw JSON only to a user-requested path.
+```zsh
+kiln embed '这段文字用于向量检索'
+cat document.txt | kiln embed
+```
 
-Embedding loads an on-demand model. The next chat request may reload the agent model.
+It sends to `/v1/embeddings` using `KILN_EMBEDDING_MODEL` and prints raw OpenAI-compatible JSON. Do not paste large vectors into a normal response; report count and dimension unless raw JSON was requested.
 
 ### OCR
 
-Use `kiln ocr INPUT [--output DIR]`. Require an existing local file or an explicit HTTP(S) URL. Pick `--output` when the user specified a destination; otherwise tell them the default is `./ocr-output` before writing there. Successful OCR produces Markdown, JSON, DOCX, and layout PNG files.
-
-OCR is slow and replaces the loaded generation model. Say that before starting a large document or batch. Do not treat OCR as direct VLM chat, Kiln intentionally delegates layout and reading order to PaddleOCR.
-
-### Configuration
-
-Use `kiln config show` to inspect validated, secret-free TOML settings.
-
-Use `kiln config set SECTION.KEY VALUE` only for an explicit requested setting change. It accepts `models.*` and `runtime.*`, validates the complete file, atomically writes it, then restarts Kiln. State the 10–15 second interruption before changing a model or runtime setting. JSON literals preserve types:
-
 ```zsh
-kiln config set runtime.enable_thinking false
-kiln config set runtime.max_kv_size 32768
-kiln config set models.draft ''
+kiln ocr ./invoice.png
+kiln ocr '只输出图片中的文字' ./invoice.png
+kiln ocr https://example.com/image.png
 ```
 
-Do not edit `~/.config/kiln/config.toml` directly. Do not attempt to change `server.*`: Kiln is intentionally fixed to `127.0.0.1:8007`, with the worker private on `:8017`.
+OCR sends a multimodal request to `/v1/chat/completions` using `KILN_OCR_MODEL`. Local images become data URLs; HTTP(S) image URLs are passed through. The default instruction is `请识别图片中的全部文字并原样输出`; override it with `KILN_OCR_INSTRUCTION` or a positional instruction.
 
-### Operations and recovery
+OCR prints the model response. It does not run PaddleOCR and does not create Markdown, JSON, DOCX, layout PNG, or an output directory. PDF and office containers are rejected; convert them to images first.
 
-- `kiln doctor`: binaries, health, loaded models, context limit.
-- `kiln logs [-f] [-n LINES]`: launchd log. Avoid `-f` unless the user wants an ongoing session.
-- `kiln unload`: release on-demand models and return to the agent baseline.
-- `kiln service {start|stop|restart|status}`: manage the launchd service. Confirm before `stop` when it could interrupt active work.
+### Models and health
 
-Only one generation model remains resident. Alternating chat and OCR rebuilds the worker and costs roughly 10–15 seconds. A `max_kv_size` over 65536 silently rotates old context, so do not recommend it as an unlimited-context setting.
+```zsh
+kiln models
+kiln doctor
+```
+
+`models` lists `/v1/models` ids. `doctor` prints `/health` JSON. Neither command exposes the API key.
+
+### Logs
+
+Kiln does not own backend logs. `kiln logs` only works when `KILN_LOG` points to an existing backend log file:
+
+```zsh
+KILN_LOG=/path/to/backend.log kiln logs -f
+```
 
 ## Failure handling
 
-- Missing input or invalid CLI syntax: show the exact corrected command, do not guess a file path.
-- `doctor` reports the server down: suggest `kiln service start`; run it only with operational authorization.
-- OCR failure: preserve the output directory and surface the last useful error. Do not delete user inputs or partial artifacts.
-- Any error mentioning an API key: stop, do not inspect the key, and ask the user to repair `~/.config/kiln/api-key` locally.
+- Missing image or invalid syntax: show the corrected `kiln` command; do not guess a path.
+- Backend unavailable: report the configured endpoint and ask for external backend recovery.
+- Missing embedding model: tell the user to set `KILN_EMBEDDING_MODEL`; never fall back to a chat model.
+- OCR failure: preserve the input and report the backend error. There is no Kiln-managed output directory.
+- API-key errors: do not inspect or repeat the key; ask the user to repair their local environment.
 
 ## Final report
 
-Use this compact format after an operation:
-
 **→ Result.** What completed or failed.
 
-**→ Kiln.** Loaded model or service state, only if it matters.
+**→ Backend.** Endpoint and model only if relevant, never the secret.
 
-**→ Output.** File path or concise result, if applicable.
+**→ Output.** Plain text, JSON path, or OCR result location if applicable.

@@ -1,79 +1,39 @@
 #!/bin/zsh
-# Regression check against the running server. Reports every failure instead of
-# stopping at the first one, so one run tells you everything that is broken.
+# Regression check against the running backend through the CLI. Reports every
+# failure instead of stopping at the first one.
 set -uo pipefail
 
-source "${0:A:h}/config.sh"
-CLI="$KILN_ROOT/kiln"
+ROOT="${0:A:h}"
+CLI="$ROOT/kiln"
+export KILN_API_KEY_FILE="${KILN_API_KEY_FILE:-$HOME/.config/kiln/api-key}"
+export KILN_MODEL="${KILN_MODEL:-ornith-ai--Ornith-1.5-35B-A3B-MLX-4bit}"
+export KILN_OCR_MODEL="${KILN_OCR_MODEL:-Unlimited-OCR-mxfp8}"
+export KILN_EMBEDDING_MODEL="${KILN_EMBEDDING_MODEL:-mlx-community--Qwen3-Embedding-4B-4bit-DWQ}"
+export KILN_TRANSLATE_MODEL="${KILN_TRANSLATE_MODEL:-Hy-MT2-1.8B-4bit}"
 
 failures=0
 pass() { print "  ok    $*" }
-fail() { print -u2 "  FAIL  $*"; (( failures++ )) }
+fail() { print -u2 "  FAIL  $*"; (( failures++ )) || true; }
 
 check() {
-  local name="$1"
-  shift
+  local name="$1"; shift
   if "$@" >/dev/null 2>&1; then pass "$name"; else fail "$name"; fi
 }
 
-# These commands are expected to exit non-zero, so match on their message
-# rather than piping into grep, which pipefail would report as a failure.
-expect_error() {
-  local name="$1" pattern="$2" output
-  shift 2
-  output="$("$@" 2>&1)"
-  if [[ "$output" == *"$pattern"* ]]; then pass "$name"; else fail "$name"; fi
-}
-
 print "syntax"
-for f in "$KILN_ROOT"/*.sh "$CLI"; do
+for f in "$ROOT"/kiln "$ROOT"/install.sh; do
   check "${f:t}" zsh -n "$f"
 done
-for f in "$KILN_ROOT"/launchd/*.plist.in; do
-  check "${f:t}" plutil -lint "$f"
-done
 
-print "\nservice"
-check "doctor" "$CLI" doctor
+print "\ndoctor"
+check "doctor reaches the backend" "$CLI" doctor
 
-print "\nAPI gateway"
-if [[ "$(curl -sS -o /dev/null -w '%{http_code}' "$KILN_URL/v1/models")" == 401 ]]; then
-  pass "requires API key"
+print "\nmodels"
+if "$CLI" models 2>/dev/null | grep -q .; then
+  pass "lists models"
 else
-  fail "requires API key"
+  fail "lists models"
 fi
-if api_models="$(curl -fsS -H "Authorization: Bearer $(< "$KILN_API_KEY_FILE")" "$KILN_URL/v1/models" 2>/dev/null)" \
-  && [[ "$api_models" == *"$KILN_AGENT_MODEL"* ]]; then
-  pass "models proxy"
-else
-  fail "models proxy"
-fi
-
-print "\nCLI configuration"
-if "$CLI" config show 2>/dev/null | "$KILN_PYTHON" -c 'import sys; text=sys.stdin.read(); assert "[models]" in text and "[runtime]" in text and "api-key =" not in text' 2>/dev/null; then
-  pass "show is secret-free"
-else
-  fail "show is secret-free"
-fi
-config_copy="$(mktemp -t kiln-config).toml"
-cp "$KILN_CONFIG_FILE" "$config_copy"
-if "$KILN_PYTHON" "$KILN_ROOT/kiln_config.py" set "$config_copy" runtime.max_tokens 8192 2>/dev/null \
-  && "$KILN_PYTHON" - "$config_copy" <<'PYCONFIG'
-from kiln_config import load
-import sys
-assert load(sys.argv[1])["runtime"]["max_tokens"] == 8192
-PYCONFIG
-then
-  pass "validated atomic update"
-else
-  fail "validated atomic update"
-fi
-if "$KILN_PYTHON" "$KILN_ROOT/kiln_config.py" set "$config_copy" server.port 9000 >/dev/null 2>&1; then
-  fail "rejects network changes"
-else
-  pass "rejects network changes"
-fi
-rm -f "$config_copy"
 
 print "\nchat"
 if [[ "$("$CLI" chat '只回复 OK' 2>/dev/null)" == OK ]]; then
@@ -87,7 +47,7 @@ else
   fail "stdin"
 fi
 
-print "\nembedding"
+print "\nembed"
 if "$CLI" embed 'regression probe' 2>/dev/null | python3 -c '
 import json, sys
 vector = json.load(sys.stdin)["data"][0]["embedding"]
@@ -98,63 +58,46 @@ else
   fail "vector"
 fi
 
-print "\nocr (slow, loads a second model)"
+print "\ntranslate"
+if [[ -n "$("$CLI" translate --lang 中文 'hello, world' 2>/dev/null)" ]]; then
+  pass "outputs a translation"
+else
+  fail "outputs a translation"
+fi
+
+print "\nocr (sends an image over the API)"
 work="$(mktemp -d -t kiln-verify)"
-"$KILN_PADDLE_PYTHON" - "$work/sample.png" <<'PY' 2>/dev/null
+"$ROOT/.venv-paddleocr/bin/python" - "$work/sample.png" <<'PY' 2>/dev/null
 import sys
 from PIL import Image, ImageDraw
 image = Image.new("RGB", (1000, 400), "white")
 draw = ImageDraw.Draw(image)
 draw.text((60, 80), "Local MLX regression sample", fill="black")
 draw.text((60, 160), "Invoice total: 1234.56 USD", fill="black")
-draw.text((60, 240), "PaddleOCR VL document parsing", fill="black")
 image.save(sys.argv[1])
 PY
 if [[ -f "$work/sample.png" ]]; then
-  if "$CLI" ocr "$work/sample.png" --output "$work/out" >/dev/null 2>&1; then
-    pass "run"
-    for pattern in '*.md' '*_res.json' '*.docx' '*_layout_det_res.png'; do
-      matches=("$work"/out/${~pattern}(N))
-      if (( ${#matches} )); then
-        pass "produced $pattern"
-      else
-        fail "produced $pattern"
-      fi
-    done
+  if out="$("$CLI" ocr "$work/sample.png" 2>/dev/null)" && [[ -n "$out" ]]; then
+    pass "returns recognition text"
   else
-    fail "run"
+    fail "returns recognition text"
   fi
 else
   fail "could not render a sample image"
 fi
 
-print "\nrecovery"
-if [[ "$("$CLI" chat '只回复 OK' 2>/dev/null)" == OK ]]; then
-  pass "chat after model switch"
-else
-  fail "chat after model switch"
-fi
-if "$CLI" unload 2>/dev/null | grep -Eq 'loaded +none'; then
-  pass "unload"
-else
-  fail "unload"
-fi
-if [[ "$("$CLI" chat '只回复 OK' 2>/dev/null)" == OK ]]; then
-  pass "chat reloads after unload"
-else
-  fail "chat reloads after unload"
-fi
-
 print "\nerrors"
-expect_error "missing input" 'OCR input not found' "$CLI" ocr "$work/does-not-exist.pdf"
-expect_error "unknown ocr option" 'unknown ocr option' "$CLI" ocr "$work/sample.png" --bogus
-expect_error "unknown service action" 'unknown service action' "$CLI" service bogus
-
 "$CLI" bogus >/dev/null 2>&1
 (( $? == 2 )) && pass "unknown command exits 2" || fail "unknown command exits 2"
 
 empty_output="$(print -n '' | "$CLI" chat 2>&1)"
-if [[ "$empty_output" == *'needs text'* ]]; then pass "empty input"; else fail "empty input"; fi
+if [[ "$empty_output" == *'needs a message'* ]]; then pass "empty input"; else fail "empty input"; fi
+
+if "$CLI" ocr "$work/does-not-exist.png" 2>/dev/null; then
+  fail "missing ocr input errors"
+else
+  pass "missing ocr input errors"
+fi
 
 rm -rf "$work"
 

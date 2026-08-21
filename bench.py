@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import json, os, time, urllib.request
 
-URL = os.environ.get("KILN_URL", "http://127.0.0.1:8007") + "/v1/chat/completions"
+URL = os.environ.get("KILN_BASE_URL", "http://127.0.0.1:8007") + "/v1/chat/completions"
 KEY = open(os.path.expanduser(
     os.environ.get("KILN_API_KEY_FILE", "~/.config/kiln/api-key"))).read().strip()
-MODEL = os.environ.get("KILN_AGENT_MODEL", "mlx-community/Qwen3.8-27B-4bit")
+MODEL = os.environ.get("KILN_MODEL", "ornith-ai--Ornith-1.5-35B-A3B-MLX-4bit")
 
 SHORT = "请写一篇关于 Apple Silicon 统一内存架构的详细技术文章。"
 LONG_CTX = ("MLX 是 Apple 推出的机器学习框架,针对 Apple Silicon 优化。" * 300
