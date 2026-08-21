@@ -31,6 +31,16 @@ export KILN_TRANSLATE_MODEL=Hy-MT2-1.8B-4bit
 
 本地后端只要检查 Authorization header，`KILN_API_KEY` 可以是任意非空值。也可以不设置它，CLI 会使用 `local`；如果设置了 `KILN_API_KEY_FILE`，CLI 会从该文件读取 key。
 
+## 终端体验
+
+如果 CLI 使用的 Python 环境安装了 `rich`，TTY 中的 Chat、Translate 和 OCR 输出会按 Markdown 渲染，`doctor` 和 `models` 会显示表格。管道和脚本输出保持纯文本/原始 JSON，不污染机器接口。
+
+```bash
+python3 -m pip install rich
+```
+
+Rich 是可选依赖。未安装时自动退回纯文本。用 `KILN_RICH=never` 强制纯文本，或 `KILN_RICH=always` 强制启用终端渲染。
+
 模型 fallback 规则：
 
 | 能力 | 环境变量 | 未设置时 |
@@ -50,6 +60,7 @@ printf '%s\n' '总结这段文本' | kiln chat
 kiln translate --lang 中文 'Hello, world.'
 kiln embed '这段文字用于向量检索'
 kiln ocr ./invoice.png
+```
 
 OCR 也可以接收自定义指令或 HTTP(S) 图片 URL：
 
@@ -121,5 +132,6 @@ CLI 使用的 endpoint：
 | `install.sh` | 安装 CLI 软链接，不管理后端 |
 | `verify.sh` | 针对运行中 API 的 CLI 回归检查 |
 | `bench.py` | OpenAI-compatible API 基准脚本 |
+| `test-data/paddleocr_vl_demo.png` | OCR 回归图片 fixture |
 
 API key、模型缓存和 OCR 输出不要提交到仓库。

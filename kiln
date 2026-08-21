@@ -67,9 +67,23 @@ write_message() {
 api_request() {
   local kind="$1" model="$2" content_file="$3" ocr_input="${4:-}" instruction="${5:-}"
   python3 - "$kind" "$BASE_URL" "$model" "$API_KEY" "$RETRIES" "$RETRY_SLEEP" "$content_file" "$ocr_input" "$instruction" <<'PY'
-import base64, json, mimetypes, re, sys, time, pathlib, urllib.error, urllib.request
+import base64, json, mimetypes, os, re, sys, time, pathlib, urllib.error, urllib.request
 
 kind, base, model, key, retries, delay, content_file, ocr_input, instruction = sys.argv[1:10]
+
+
+def render_text(text):
+    setting = os.environ.get("KILN_RICH", "auto").lower()
+    if setting == "never" or (setting != "always" and not sys.stdout.isatty()):
+        print(text)
+        return
+    try:
+        from rich.console import Console
+        from rich.markdown import Markdown
+    except ImportError:
+        print(text)
+        return
+    Console().print(Markdown(text))
 retries, delay = max(1, int(retries)), float(delay)
 
 def show_error(code, body=""):
@@ -140,7 +154,7 @@ if kind == "embed":
     sys.stdout.write(final_body)
 else:
     try:
-        print(json.loads(final_body)["choices"][0]["message"].get("content", ""))
+        render_text(json.loads(final_body)["choices"][0]["message"].get("content", ""))
     except Exception:
         sys.stderr.write(final_body)
         sys.exit(4)
@@ -197,7 +211,7 @@ cmd_ocr() {
 
 cmd_models() {
   python3 - "$BASE_URL" "$API_KEY" <<'PY'
-import json, sys, urllib.error, urllib.request
+import json, os, sys, urllib.error, urllib.request
 base, key = sys.argv[1], sys.argv[2]
 request = urllib.request.Request(base.rstrip("/") + "/v1/models", headers={"Authorization": "Bearer " + key})
 try:
@@ -208,14 +222,27 @@ except urllib.error.HTTPError as exc:
     sys.exit(3)
 except OSError as exc:
     sys.stderr.write("connection failed to %s: %s\n" % (base, exc)); sys.exit(3)
-for item in data.get("data", []):
-    print(item.get("id"))
+items = data.get("data", [])
+try:
+    from rich.console import Console
+    from rich.table import Table
+    if os.environ.get("KILN_RICH", "auto").lower() == "always" or sys.stdout.isatty():
+        table = Table(title="Available models")
+        table.add_column("Model", style="cyan")
+        for item in items:
+            table.add_row(item.get("id", ""))
+        Console().print(table)
+    else:
+        raise ImportError
+except ImportError:
+    for item in items:
+        print(item.get("id"))
 PY
 }
 
 cmd_doctor() {
   python3 - "$BASE_URL" "$API_KEY" <<'PY'
-import json, sys, urllib.error, urllib.request
+import json, os, sys, urllib.error, urllib.request
 base, key = sys.argv[1], sys.argv[2]
 request = urllib.request.Request(base.rstrip("/") + "/health", headers={"Authorization": "Bearer " + key})
 try:
@@ -226,7 +253,20 @@ except urllib.error.HTTPError as exc:
     sys.exit(3)
 except OSError as exc:
     sys.stderr.write("connection failed to %s: %s\n" % (base, exc)); sys.exit(3)
-sys.stdout.write(json.dumps(health, ensure_ascii=False) + "\n")
+try:
+    from rich.console import Console
+    from rich.table import Table
+    if os.environ.get("KILN_RICH", "auto").lower() == "always" or sys.stdout.isatty():
+        table = Table(title="Kiln backend")
+        table.add_column("Field", style="cyan")
+        table.add_column("Value", style="green")
+        for key, value in health.items():
+            table.add_row(str(key), json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value))
+        Console().print(table)
+    else:
+        raise ImportError
+except ImportError:
+    sys.stdout.write(json.dumps(health, ensure_ascii=False) + "\n")
 PY
 }
 

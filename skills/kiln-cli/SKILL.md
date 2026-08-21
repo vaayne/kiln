@@ -23,6 +23,8 @@ export KILN_TRANSLATE_MODEL=Hy-MT2-1.8B-4bit
 
 OCR and translation fall back to `KILN_MODEL` when their specific model variable is unset. Embeddings have no fallback and fail clearly when `KILN_EMBEDDING_MODEL` is unset.
 
+If `rich` is installed in the Python used by the CLI, TTY output gets Markdown and table rendering. Pipes stay machine-readable. Use `KILN_RICH=never` to force plain output or `KILN_RICH=always` to force rich rendering.
+
 ## Safe start
 
 Run `kiln doctor` before an operation that depends on the backend when availability is uncertain. If it is down, report the endpoint and ask the user to repair or start the backend externally. Do not run backend recovery commands on Kiln's behalf.
@@ -77,7 +79,7 @@ kiln models
 kiln doctor
 ```
 
-`models` lists `/v1/models` ids. `doctor` prints `/health` JSON. Neither command exposes the API key.
+`models` lists `/v1/models` ids. In a TTY it uses a Rich table when available; pipes receive one id per line. `doctor` prints `/health` JSON, or a Rich table in a TTY. Neither command exposes the API key.
 
 ### Logs
 
