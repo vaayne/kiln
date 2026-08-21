@@ -2,6 +2,7 @@ api-key
 *.log
 .DS_Store
 __pycache__/
+.venv-kiln/
 test-data/
 test-output*/
 

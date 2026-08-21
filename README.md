@@ -6,14 +6,14 @@ Kiln 是一个纯 CLI，用 OpenAI-compatible API 调用本地 omlx 后端。Kil
 
 ## 安装
 
-需要 macOS 和 zsh。后端由 omlx 或其他 OpenAI-compatible server 独立安装和管理。
+需要 macOS、zsh 和 [uv](https://docs.astral.sh/uv/)。后端由 omlx 或其他 OpenAI-compatible server 独立安装和管理。
 
 ```bash
 cd ~/workspace/kiln
 ./install.sh
 ```
 
-安装脚本只会把 `kiln` 链接到 `~/.local/bin/kiln`，不会修改或启动后端。
+安装脚本会在 `.venv-kiln` 中安装 Kiln 的直接 Python 依赖（当前是 `rich`），再把 `kiln` 链接到 `~/.local/bin/kiln`。它不会修改或启动后端。可用 `KILN_VENV`、`KILN_BIN` 覆盖路径。
 
 ## 环境变量
 
@@ -33,13 +33,9 @@ export KILN_TRANSLATE_MODEL=Hy-MT2-1.8B-4bit
 
 ## 终端体验
 
-如果 CLI 使用的 Python 环境安装了 `rich`，TTY 中的 Chat、Translate 和 OCR 输出会按 Markdown 渲染，`doctor` 和 `models` 会显示表格。管道和脚本输出保持纯文本/原始 JSON，不污染机器接口。
+CLI 的直接依赖是 `requirements.txt` 中的 `rich`。TTY 中的 Chat、Translate 和 OCR 输出会按 Markdown 渲染，`doctor` 和 `models` 会显示表格；管道和脚本输出保持纯文本/原始 JSON，不污染机器接口。
 
-```bash
-python3 -m pip install rich
-```
-
-Rich 是可选依赖。未安装时自动退回纯文本。用 `KILN_RICH=never` 强制纯文本，或 `KILN_RICH=always` 强制启用终端渲染。
+`./install.sh` 会自动安装它。CLI 也支持 `KILN_PYTHON` 覆盖 Python runtime。用 `KILN_RICH=never` 强制纯文本，或 `KILN_RICH=always` 强制启用终端渲染。
 
 模型 fallback 规则：
 
@@ -129,7 +125,8 @@ CLI 使用的 endpoint：
 | 文件 | 用途 |
 | --- | --- |
 | `kiln` | 纯 OpenAI-compatible CLI |
-| `install.sh` | 安装 CLI 软链接，不管理后端 |
+| `install.sh` | 安装 CLI 依赖和软链接，不管理后端 |
+| `requirements.txt` | CLI 直接 Python 依赖，目前是 `rich` |
 | `verify.sh` | 针对运行中 API 的 CLI 回归检查 |
 | `bench.py` | OpenAI-compatible API 基准脚本 |
 | `test-data/paddleocr_vl_demo.png` | OCR 回归图片 fixture |

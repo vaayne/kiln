@@ -7,6 +7,13 @@ set -euo pipefail
 
 die() { print -u2 "error: $*"; exit 1; }
 
+ROOT="${0:A:h}"
+PYTHON="${KILN_PYTHON:-$ROOT/.venv-kiln/bin/python}"
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON="${KILN_SYSTEM_PYTHON:-$(command -v python3 || true)}"
+fi
+[[ -x "$PYTHON" ]] || die "Python 3 is required; run ./install.sh or set KILN_PYTHON"
+
 BASE_URL="${KILN_BASE_URL:-http://127.0.0.1:8007}"
 API_KEY="${KILN_API_KEY:-}"
 if [[ -z "$API_KEY" && -n "${KILN_API_KEY_FILE:-}" && -f "${KILN_API_KEY_FILE:-}" ]]; then
@@ -66,7 +73,7 @@ write_message() {
 # the message; for ocr, ocr_input is the image path or URL.
 api_request() {
   local kind="$1" model="$2" content_file="$3" ocr_input="${4:-}" instruction="${5:-}"
-  python3 - "$kind" "$BASE_URL" "$model" "$API_KEY" "$RETRIES" "$RETRY_SLEEP" "$content_file" "$ocr_input" "$instruction" <<'PY'
+  "$PYTHON" - "$kind" "$BASE_URL" "$model" "$API_KEY" "$RETRIES" "$RETRY_SLEEP" "$content_file" "$ocr_input" "$instruction" <<'PY'
 import base64, json, mimetypes, os, re, sys, time, pathlib, urllib.error, urllib.request
 
 kind, base, model, key, retries, delay, content_file, ocr_input, instruction = sys.argv[1:10]
@@ -210,7 +217,7 @@ cmd_ocr() {
 }
 
 cmd_models() {
-  python3 - "$BASE_URL" "$API_KEY" <<'PY'
+  "$PYTHON" - "$BASE_URL" "$API_KEY" <<'PY'
 import json, os, sys, urllib.error, urllib.request
 base, key = sys.argv[1], sys.argv[2]
 request = urllib.request.Request(base.rstrip("/") + "/v1/models", headers={"Authorization": "Bearer " + key})
@@ -241,7 +248,7 @@ PY
 }
 
 cmd_doctor() {
-  python3 - "$BASE_URL" "$API_KEY" <<'PY'
+  "$PYTHON" - "$BASE_URL" "$API_KEY" <<'PY'
 import json, os, sys, urllib.error, urllib.request
 base, key = sys.argv[1], sys.argv[2]
 request = urllib.request.Request(base.rstrip("/") + "/health", headers={"Authorization": "Bearer " + key})
