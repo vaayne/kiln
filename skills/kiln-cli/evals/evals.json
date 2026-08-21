@@ -3,36 +3,35 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "用我的本地 Kiln 模型把下面这段发布说明压成 3 条中文要点：Kiln 现在支持文档 OCR，模型按需加载，切换 OCR 和聊天约要等 15 秒。",
-      "expected_output": "Checks service safely, invokes kiln chat without exposing secrets, and returns the concise Chinese result.",
+      "prompt": "用我的本地 Kiln 模型把下面这段发布说明压成 3 条中文要点：Kiln 现在通过 OpenAI-compatible API 调用本地模型。",
+      "expected_output": "Checks the API safely, invokes kiln chat without exposing secrets, and returns the concise Chinese result.",
       "files": [],
       "expectations": [
-        "Checks availability with `kiln doctor` before the generation command.",
+        "Uses `kiln doctor` when backend availability is uncertain.",
         "Uses `kiln chat` for the requested local-model summary.",
         "Does not expose or request the API key."
       ]
     },
     {
       "id": 2,
-      "prompt": "帮我把 /Users/vaayne/Documents/invoice.pdf 用本机模型 OCR，结果放到 ~/Desktop/invoice-ocr。开始前告诉我会不会影响正在跑的聊天。",
-      "expected_output": "Explains model-switch interruption, runs kiln ocr with an explicit output directory, and reports the artifacts without inventing file contents.",
+      "prompt": "帮我用本机 OCR 模型识别 /Users/vaayne/Documents/invoice.png，开始前说明 Kiln 是否会启动或切换后端。",
+      "expected_output": "Explains that Kiln only sends the image to the external backend, runs kiln ocr, and reports the returned text without inventing files.",
       "files": [],
       "expectations": [
-        "States that OCR may switch the resident generation model and cost about 10–15 seconds to resume chat.",
-        "Uses `kiln ocr` with `/Users/vaayne/Documents/invoice.pdf` and `--output ~/Desktop/invoice-ocr`.",
-        "Does not fabricate OCR contents or delete the requested output directory."
+        "Uses `kiln ocr` with the image path and no obsolete `--output` option.",
+        "States that Kiln does not start, stop, or manage the backend.",
+        "Does not claim that Markdown, JSON, DOCX, or layout PNG artifacts were created."
       ]
     },
     {
       "id": 3,
-      "prompt": "把 Kiln 的 thinking 关掉，顺便确认下服务有没有起来。",
-      "expected_output": "Uses doctor and kiln config set runtime.enable_thinking false, explains the restart window, and never edits TOML or exposes the key.",
+      "prompt": "确认 Kiln 当前后端和可用模型，并告诉我如果想关闭 thinking 应该在哪里配置。",
+      "expected_output": "Uses doctor and models, then explains that Kiln has no runtime-setting command and model/runtime settings belong to the external backend.",
       "files": [],
       "expectations": [
-        "Uses `kiln doctor` to inspect service state.",
-        "Uses `kiln config set runtime.enable_thinking false`, not a direct TOML edit.",
-        "Warns that the setting restarts Kiln and briefly interrupts requests.",
-        "Does not expose or request the API key."
+        "Uses `kiln doctor` to inspect backend health.",
+        "Uses `kiln models` to inspect available model ids.",
+        "Does not suggest `kiln config set`, direct Kiln TOML editing, or backend lifecycle commands."
       ]
     }
   ]

@@ -67,15 +67,7 @@ fi
 
 print "\nocr (sends an image over the API)"
 work="$(mktemp -d -t kiln-verify)"
-"$ROOT/.venv-paddleocr/bin/python" - "$work/sample.png" <<'PY' 2>/dev/null
-import sys
-from PIL import Image, ImageDraw
-image = Image.new("RGB", (1000, 400), "white")
-draw = ImageDraw.Draw(image)
-draw.text((60, 80), "Local MLX regression sample", fill="black")
-draw.text((60, 160), "Invoice total: 1234.56 USD", fill="black")
-image.save(sys.argv[1])
-PY
+cp "$ROOT/test-data/paddleocr_vl_demo.png" "$work/sample.png"
 if [[ -f "$work/sample.png" ]]; then
   if out="$("$CLI" ocr "$work/sample.png" 2>/dev/null)" && [[ -n "$out" ]]; then
     pass "returns recognition text"
@@ -83,7 +75,7 @@ if [[ -f "$work/sample.png" ]]; then
     fail "returns recognition text"
   fi
 else
-  fail "could not render a sample image"
+  fail "missing OCR fixture"
 fi
 
 print "\nerrors"

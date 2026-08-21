@@ -121,6 +121,5 @@ CLI 使用的 endpoint：
 | `install.sh` | 安装 CLI 软链接，不管理后端 |
 | `verify.sh` | 针对运行中 API 的 CLI 回归检查 |
 | `bench.py` | OpenAI-compatible API 基准脚本 |
-| `kiln_server.py` / `kiln_config.py` | 旧版后端实现，CLI 不再调用 |
 
 API key、模型缓存和 OCR 输出不要提交到仓库。
